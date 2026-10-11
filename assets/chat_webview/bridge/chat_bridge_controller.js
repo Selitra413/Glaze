@@ -981,15 +981,24 @@ export class Bridge {
 
     if (msg.isError !== undefined) section.classList.toggle('error', !!msg.isError);
 
-    const isUser = section.classList.contains('user');
-    this.renderer.updateMessageContent(
-      section,
-      msg.text != null ? msg.text : (section.dataset.rawText || ''),
-      msg.reasoning ?? null,
-      isUser,
-      !!msg.isTyping,
-      animate,
-    );
+    // A background update (memory badge, LEDGER clock, gen-time) can land while
+    // the section is open for editing. `updateMessageContent` clears `.msg-body`
+    // and rebuilds it, which would destroy the `.edit-textarea` the user is
+    // typing into — leaving the section classed `editing` with no editor and
+    // the Dart side still believing an edit is active. Keep the textarea: the
+    // datasets above are what `stopEdit` re-renders from, so the saved text
+    // still reaches the bubble when the edit ends.
+    if (!section.classList.contains('editing')) {
+      const isUser = section.classList.contains('user');
+      this.renderer.updateMessageContent(
+        section,
+        msg.text != null ? msg.text : (section.dataset.rawText || ''),
+        msg.reasoning ?? null,
+        isUser,
+        !!msg.isTyping,
+        animate,
+      );
+    }
     this._imgGenTimer.ensureRunning();
 
     if (msg.isHidden !== undefined) {

@@ -22,6 +22,7 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../extensions/services/panel_host_service.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../chat_provider.dart';
+import '../editing_message_provider.dart';
 import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
 import 'chat_streaming_bridge_sync.dart';
@@ -478,7 +479,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final initSessionId = widget.sessionId;
     final initMessages = List<ChatMessage>.of(widget.messages);
     final initVisibleStartIndex = widget.visibleStartIndex;
-    _resetStreamingPresentationState();
+    _resetAfterDomRework();
     PerfDebug.chatWebViewInitAttempted();
     try {
       await _waitForJsBridgeReady();
@@ -618,7 +619,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (!mounted) return;
     _ready = false;
     _initFuture = null;
-    _resetStreamingPresentationState();
+    _resetAfterDomRework();
     _syncState.resetMutations();
     _clearBridgeRegistry?.call();
     _bridge = null;
@@ -667,7 +668,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       debugPrint('[ChatWebView] rebuilding the view after a failed $phase');
       _ready = false;
       _initFuture = null;
-      _resetStreamingPresentationState();
+      _resetAfterDomRework();
       _syncState.resetMutations();
       _bridge = null;
       _clearBridgeRegistry?.call();
@@ -712,7 +713,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
       await _bridgeOp(bridge.clearAll(), label: 'clearAll');
-      _resetStreamingPresentationState();
+      _resetAfterDomRework();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -750,7 +751,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         visibleStartIndex: widget.visibleStartIndex,
         busy: widget.isGenerating || widget.isSendPending,
         sessionSwitching: false,
-        onDomReset: _resetStreamingPresentationState,
+        onDomReset: _resetAfterDomRework,
       ),
       label: 'resyncMessagesAfterInit',
     );
@@ -973,7 +974,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         label: 'clearAll',
       );
       if (!ownsSwitch()) return;
-      _resetStreamingPresentationState();
+      _resetAfterDomRework();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -1048,6 +1049,28 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     _syncState.wasBusy = widget.isGenerating || widget.isSendPending;
     _syncState.streamingSent = false;
     _syncState.regenStreamingSent = false;
+  }
+
+  /// The message list is about to be rebuilt from scratch (a full re-render, a
+  /// session switch) or the page behind it is being replaced. Alongside the
+  /// streaming re-arm this drops any open edit session.
+  ///
+  /// The textarea the editor lived in is in the DOM being replaced, so the
+  /// Save/Cancel controls that would end the edit are gone with it — yet
+  /// `editingMessageIdProvider` stays set, and its guards keep the composer
+  /// read-only and regenerate/send disabled with no way to clear it. That is
+  /// the reported "tap edit, then nothing works until the app is restarted".
+  void _resetAfterDomRework() {
+    _resetStreamingPresentationState();
+    _clearEditingSession();
+  }
+
+  /// Clears an in-flight message edit, if any. See [_resetAfterDomRework].
+  void _clearEditingSession() {
+    final charId = widget.charId;
+    if (ref.read(editingMessageIdProvider(charId)) != null) {
+      ref.read(editingMessageIdProvider(charId).notifier).state = null;
+    }
   }
 
   /// Raises/lowers the switch cover, from anywhere.
@@ -1309,7 +1332,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       visibleStartIndex: visibleStartIndex,
       busy: busy,
       sessionSwitching: sessionSwitching,
-      onDomReset: _resetStreamingPresentationState,
+      onDomReset: _resetAfterDomRework,
     );
   }
 
@@ -1371,7 +1394,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       onRefreshExtBlocksPanel: _refreshExtBlocksPanel,
       onSyncExtBlockPanels: _syncExtBlockPanels,
       onReconcileActiveGeneration: _reconcileActiveGenerationPresentation,
-      onDomReset: _resetStreamingPresentationState,
+      onDomReset: _resetAfterDomRework,
       isCurrentBridge: (bridge) => identical(_bridge, bridge),
     ).attach();
 
