@@ -51,9 +51,76 @@ jobs:
           translation_commit=$(git -C ../translation-base rev-parse HEAD)
           echo "Cherry-picking translation changes onto current nightly"
           git cherry-pick --no-commit "$translation_commit" || {
-            git status --short
-            echo "::error::The stable patch conflicts with current nightly. Manual port needed; no changes were pushed."
-            exit 1
+            echo "Cherry-pick has conflicts; checking whether they are the three known translation integration files."
+            git diff --name-only --diff-filter=U | sort > /tmp/conflicted.txt
+            printf '%s\n' \
+              assets/chat_webview/bridge/chat_bridge_controller.js \
+              lib/features/settings/api_settings_screen.dart \
+              test/api_settings_tab_order_test.dart | sort > /tmp/expected.txt
+            diff -u /tmp/expected.txt /tmp/conflicted.txt || {
+              echo "::error::Unexpected conflict paths; manual review required."
+              exit 1
+            }
+            git checkout --ours -- \
+              assets/chat_webview/bridge/chat_bridge_controller.js \
+              lib/features/settings/api_settings_screen.dart \
+              test/api_settings_tab_order_test.dart
+            python3 - <<'PYMERGE'
+          from pathlib import Path
+          import re
+
+          def amend(path, fn):
+              p = Path(path)
+              before = p.read_text()
+              after = fn(before)
+              assert before != after, f'No ported changes in {path}'
+              p.write_text(after)
+
+          def swap(text, old, new):
+              count = text.count(old)
+              if count != 1:
+                  raise ValueError(f'Expected one anchor, got {count}: {old[:100]!r}')
+              return text.replace(old, new, 1)
+
+          stable = Path('../translation-base')
+          def js_port(s):
+              patched = (stable / 'assets/chat_webview/bridge/chat_bridge_controller.js').read_text()
+              begin = '  /* ---------- Ephemeral, visual-only translated overlays ---------- */'
+              end = '  /* ---------- Message list API ---------- */'
+              methods = patched[patched.index(begin):patched.index(end)]
+              s = swap(s, '    this.virtualList = virtualList;\n', '    this.virtualList = virtualList;\n    this._visualTranslations = new Map();\n')
+              s = swap(s, end, methods + end)
+              s = swap(s, '      for (const el of rendered) {\n        const id = el.dataset.messageId', '      for (const el of rendered) {\n        this._applyVisualTranslation(el);\n        const id = el.dataset.messageId')
+              s = swap(s, '    for (const el of rendered) {\n      const id = el.dataset.messageId', '    for (const el of rendered) {\n      this._applyVisualTranslation(el);\n      const id = el.dataset.messageId')
+              s = swap(s, '        const el = rendered[j];\n        const id = el.dataset.messageId', '        const el = rendered[j];\n        this._applyVisualTranslation(el);\n        const id = el.dataset.messageId')
+              s = swap(s, '    this._imgGenTimer.ensureRunning();\n\n    if (msg.isHidden !== undefined)', '    this._applyVisualTranslation(section);\n    this._imgGenTimer.ensureRunning();\n\n    if (msg.isHidden !== undefined)')
+              return s
+
+          def dart_port(s):
+              s = swap(s, "import 'api_list_provider.dart';", "import 'api_list_provider.dart';\nimport '../translation/translator_settings_panel.dart';")
+              s = swap(s, '2 = Embeddings\n', '2 = Embeddings, 3 = Translator\n')
+              s = swap(s, '  final _agentsScrollController = ScrollController();', '  final _agentsScrollController = ScrollController();\n  final _translatorScrollController = ScrollController();')
+              s = swap(s, '    _agentsScrollController.dispose();', '    _agentsScrollController.dispose();\n    _translatorScrollController.dispose();')
+              s = swap(s, '        1 => _agentsScrollController,\n        _ => _embScrollController,', '        1 => _agentsScrollController,\n        2 => _embScrollController,\n        _ => _translatorScrollController,')
+              s = swap(s, "      headerBottom: list.isEmpty && embeddingList.isEmpty\n          ? null\n          : _buildTabBar(),", "      headerBottom: _buildTabBar(),")
+              s,n = re.subn(r'data: \(list\) => list\.isEmpty && embeddingList\.isEmpty\s*\? _buildEmptyState\(forEmbedding: false\)\s*: SwipeTabSwitcher\(', 'data: (list) => SwipeTabSwitcher(', s, count=1)
+              assert n == 1, "Missing SwipeTabSwitcher anchor"
+              s = swap(s, '                       length: 3,', '                       length: 4,')
+              s = swap(s, '                           _ =>\n                             embeddingList.isEmpty', '                           2 =>\n                             embeddingList.isEmpty')
+              s = swap(s, '                                     embeddingName,\n                                   ),\n                         },', '                                     embeddingName,\n                                   ),\n                           _ => TranslatorSettingsPanel(\n                             controller: _translatorScrollController,\n                           ),\n                         },')
+              s = swap(s, "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),", "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),\n           GlazeTabItem(\n             label: 'visual_translator_tab'.tr(),\n             icon: Icons.translate_outlined,\n           ),")
+              return s
+
+          def test_port(s):
+              s = swap(s, "test('the strip reads LLM, Agents, Embeddings',", "test('the strip reads LLM, Agents, Embeddings, Translator',")
+              s = swap(s, "    expect(embeddings, greaterThan(agents));", "    expect(embeddings, greaterThan(agents));\n    expect(screen.indexOf(\"label: 'visual_translator_tab'.tr()\"), greaterThan(embeddings));")
+              s = swap(s, "    expect(screen, contains('_ => _embScrollController,'));", "    expect(screen, contains('2 => _embScrollController,'));\n    expect(screen, contains('_ => _translatorScrollController,'));")
+              return s
+
+          amend('assets/chat_webview/bridge/chat_bridge_controller.js', js_port)
+          amend('lib/features/settings/api_settings_screen.dart', dart_port)
+          amend('test/api_settings_tab_order_test.dart', test_port)
+          PYMERGE
           }
           git rm -f -- Glaze-translator-patch.zip .github/workflows/import-translation.yml
           git add -A
