@@ -12,6 +12,8 @@ import '../../../core/services/character_book_converter.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/utils/error_format.dart';
+import '../../guides/guide_anchor.dart';
+import '../../guides/guide_service.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
@@ -35,7 +37,6 @@ import '../services/janitor_webview_proxy.dart';
 import 'datacat_phase_label.dart';
 import 'janitor_build_widgets.dart';
 import 'janitor_extraction_settings_sheet.dart';
-import 'janitor_lorebook_intro_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
@@ -64,16 +65,15 @@ extension _PhaseLabel on _Phase {
 /// [characterId] is the Glaze character the saved books are scoped to; null
 /// saves them as standalone (global) lorebooks.
 ///
-/// The very first open is preceded by a one-time explainer
-/// ([maybeShowJanitorLorebookIntro]).
+/// The first open is walked through once by a spotlight tour
+/// ([AppGuide.lorebookCapture]), started from the sheet itself once its
+/// lorebooks have loaded.
 Future<void> showJanitorLorebookCaptureSheet(
   BuildContext context, {
   required JanitorLorebookArgs args,
   String? characterId,
   ExtractionResult? initialExtraction,
 }) async {
-  await maybeShowJanitorLorebookIntro(context);
-  if (!context.mounted) return;
   return showGlazeSheet<void>(
     context: context,
     useRootNavigator: true,
@@ -297,6 +297,19 @@ class _JanitorLorebookCaptureState
     setState(() {
       _public = books;
       _loadingPublic = false;
+    });
+    _maybeShowCaptureTour();
+  }
+
+  /// Walks the reader through the sheet the first time it opens. Deferred to
+  /// after the frame the lorebooks landed in, so the controls the tour points
+  /// at are laid out. A capture the caller already ran
+  /// ([JanitorLorebookCapture.initialExtraction]) opens straight at the build
+  /// stage, which the collect-stage tour does not describe, so it is skipped.
+  void _maybeShowCaptureTour() {
+    if (widget.initialExtraction != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, AppGuide.lorebookCapture);
     });
   }
 
@@ -982,16 +995,19 @@ class _JanitorLorebookCaptureState
   Widget _stageContent(ColorScheme cs, List<PublicLorebook> closed) {
     final children = switch (_phase) {
       _Phase.collect => [
-        _PublicSection(
-          books: _public,
-          onDownload: _downloadPublic,
-          onDownloadJs: _downloadJs,
-          onDownloadAll: _downloadAllPublic,
-          downloadedIds: _downloadedIds,
-          buildingId: _jsBuildingId,
-          savingAll: _savingAll,
-          savedAllDone: _savedAllDone,
-          savedAllTotal: _savedAllTotal,
+        GuideAnchor(
+          id: GuideIds.lorebookCapturePublic,
+          child: _PublicSection(
+            books: _public,
+            onDownload: _downloadPublic,
+            onDownloadJs: _downloadJs,
+            onDownloadAll: _downloadAllPublic,
+            downloadedIds: _downloadedIds,
+            buildingId: _jsBuildingId,
+            savingAll: _savingAll,
+            savedAllDone: _savedAllDone,
+            savedAllTotal: _savedAllTotal,
+          ),
         ),
         if (closed.isNotEmpty)
           ...switch (_source) {
@@ -1130,19 +1146,22 @@ class _JanitorLorebookCaptureState
       // A single action for every closed book: the capture assembles the whole
       // prompt at once, so all closed lorebooks are collected together (not one
       // per row).
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: ActionTile(
-          icon: Icons.auto_fix_high_rounded,
-          expand: true,
-          primary: true,
-          busy: _extracting,
-          // The capture's live phase reads inside the button it belongs to —
-          // one busy control, not a button plus a status line under it.
-          label: _extracting
-              ? (_extractPhase ?? 'catalog_lorebooks_extracting'.tr())
-              : 'catalog_lorebooks_collect_btn'.tr(),
-          onTap: _canRebuild ? _extractAll : null,
+      GuideAnchor(
+        id: GuideIds.lorebookCaptureCollect,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: ActionTile(
+            icon: Icons.auto_fix_high_rounded,
+            expand: true,
+            primary: true,
+            busy: _extracting,
+            // The capture's live phase reads inside the button it belongs to —
+            // one busy control, not a button plus a status line under it.
+            label: _extracting
+                ? (_extractPhase ?? 'catalog_lorebooks_extracting'.tr())
+                : 'catalog_lorebooks_collect_btn'.tr(),
+            onTap: _canRebuild ? _extractAll : null,
+          ),
         ),
       ),
       _buildExtractStatus(cs),
@@ -1482,16 +1501,19 @@ class _JanitorLorebookCaptureState
       helpTerm: 'janitor-extract-context',
       description: 'catalog_lorebooks_extract_hint'.tr(),
       items: [
-        ContextSourceTile(
-          label: 'catalog_ctx_card'.tr(),
-          content: _extraction?.cardContext ?? '',
-          // The card only exists inside the assembled prompt, so before the
-          // capture there is nothing to show — but the capture's first send
-          // reveals it in time for the trigger, so the switch stays live.
-          emptyNote: 'catalog_ctx_card_pending'.tr(),
-          pending: _extraction == null,
-          value: _extractSources.card,
-          onChanged: (v) => setState(() => _extractSources.card = v),
+        GuideAnchor(
+          id: GuideIds.lorebookCaptureExtract,
+          child: ContextSourceTile(
+            label: 'catalog_ctx_card'.tr(),
+            content: _extraction?.cardContext ?? '',
+            // The card only exists inside the assembled prompt, so before the
+            // capture there is nothing to show — but the capture's first send
+            // reveals it in time for the trigger, so the switch stays live.
+            emptyNote: 'catalog_ctx_card_pending'.tr(),
+            pending: _extraction == null,
+            value: _extractSources.card,
+            onChanged: (v) => setState(() => _extractSources.card = v),
+          ),
         ),
         ContextSourceTile(
           label: 'catalog_ctx_catalog'.tr(),

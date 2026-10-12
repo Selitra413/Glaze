@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/catalog/widgets/catalog_onboarding_sheet.dart';
-import 'package:glaze_flutter/features/catalog/widgets/janitor_lorebook_intro_sheet.dart';
 import 'package:glaze_flutter/features/character_list/widgets/character_hiding_onboarding_sheet.dart';
 import 'package:glaze_flutter/features/guides/guide_anchor.dart';
 import 'package:glaze_flutter/features/guides/guide_service.dart';
@@ -166,31 +165,32 @@ void main() {
     });
   });
 
-  group('janitor lorebook intro', () {
-    testWidgets('opens as a desktop window', (tester) async {
+  group('janitor lorebook capture tour', () {
+    testWidgets('opens as a spotlight tour on desktop', (tester) async {
+      resetGuideSession();
+      late BuildContext host;
       await pumpDesktop(
         tester,
         Builder(
-          builder: (context) => Center(
-            child: ElevatedButton(
-              key: const ValueKey('open'),
-              onPressed: () =>
-                  unawaited(maybeShowJanitorLorebookIntro(context)),
-              child: const Text('open'),
-            ),
-          ),
+          builder: (context) {
+            host = context;
+            return const SizedBox.expand();
+          },
         ),
+        prefs: const {'onboarding_complete': true},
       );
 
-      await tester.tap(find.byKey(const ValueKey('open')));
-      await settleRoute(tester);
+      await tester.runAsync(() async {
+        unawaited(maybeShowGuide(host, AppGuide.lorebookCapture));
+        await Future<void>.delayed(const Duration(milliseconds: 1700));
+      });
+      await settle(tester);
 
-      expect(find.byType(GlazeSheetWindow), findsOneWidget);
+      expect(find.byType(GuideTourView), findsOneWidget);
       expect(
-        find.text('How closed lorebooks are recovered'),
+        find.text('Lorebooks this character carries'),
         findsOneWidget,
       );
-      expect(find.byType(BottomSheet), findsNothing);
     });
   });
 
