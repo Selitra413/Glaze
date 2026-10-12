@@ -1490,6 +1490,25 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     return b.scrollToTop();
   }
 
+  /// A visual-only overlay; does not call updateMessage or touch the database.
+  Future<void> setVisualTranslation(String id, String original, String text) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.setVisualTranslation(id, original, text);
+  }
+
+  Future<void> clearVisualTranslation(String id) {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.clearVisualTranslation(id);
+  }
+
+  Future<void> clearAllVisualTranslations() {
+    final bridge = _bridge;
+    if (bridge == null || !_ready) return Future.value();
+    return bridge.clearAllVisualTranslations();
+  }
+
   /// Arm a one-shot "stick to bottom on the next append" so sending a message
   /// scrolls the view down even if the user had scrolled up. Called before the
   /// new message is dispatched so the flag is set ahead of the append.

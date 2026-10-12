@@ -736,6 +736,20 @@ class ChatBridgeController {
       messages.scrollToMessage(id, highlight: highlight);
   Future<void> showHeader() => messages.showHeader();
 
+  /// Replaces only the WebView's visual body, not the stored message text.
+  Future<void> setVisualTranslation(String id, String original, String text) =>
+      callJs('setVisualTranslation', jsonEncode({
+        'id': id,
+        'original': original,
+        'text': text,
+      }));
+
+  Future<void> clearVisualTranslation(String id) =>
+      callJs('clearVisualTranslation', id);
+
+  Future<void> clearAllVisualTranslations() =>
+      evalJs('window.bridge?.clearAllVisualTranslations()');
+
   // Theme
   Future<void> setBackgroundNoise(double opacity, double intensity) =>
       theme.setBackgroundNoise(opacity, intensity);

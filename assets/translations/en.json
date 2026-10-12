@@ -1,4 +1,8 @@
 {
+  "visual_translation_stop": "Stop translation",
+  "visual_translation_original": "Show original",
+  "visual_translation_translate": "Translate to Russian",
+  "visual_translator_tab": "Translator",
   "extra_request_parameters": "Extra request parameters",
   "extra_request_parameters_desc": "Enabled parameters are added to the JSON request body",
   "extra_request_parameters_studio_desc": "Overrides for the API selected for this Studio slot",

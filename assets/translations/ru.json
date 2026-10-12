@@ -1,4 +1,8 @@
 {
+  "visual_translation_stop": "Остановить перевод",
+  "visual_translation_original": "Показать оригинал",
+  "visual_translation_translate": "Перевести",
+  "visual_translator_tab": "Переводчик",
   "extra_request_parameters": "Дополнительные параметры запроса",
   "extra_request_parameters_desc": "Включённые параметры добавляются в JSON-тело запроса",
   "extra_request_parameters_studio_desc": "Переопределения для API, выбранного в этом слоте Studio",

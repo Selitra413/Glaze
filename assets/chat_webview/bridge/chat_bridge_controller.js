@@ -39,6 +39,7 @@ export class Bridge {
   constructor(renderer, virtualList) {
     this.renderer = renderer;
     this.virtualList = virtualList;
+    this._visualTranslations = new Map();
     this._pendingRequests = new Map();
     this._requestCounter = 0;
     this.isGenerating = false;
@@ -775,6 +776,53 @@ export class Bridge {
     }
   }
 
+  /* ---------- Ephemeral, visual-only translated overlays ---------- */
+  _translationSection(id) {
+    // Comparing attributes instead of interpolating CSS selectors permits IDs
+    // with punctuation and does not treat message IDs as selector fragments.
+    return [...document.querySelectorAll('.message-section[data-message-id]')]
+      .find(el => el.dataset.messageId === id) || null;
+  }
+
+  _applyVisualTranslation(section) {
+    if (!section) return;
+    const id = section.dataset.messageId;
+    const cached = this._visualTranslations.get(id);
+    if (!cached) return;
+    if (cached.original !== section.dataset.rawText) {
+      this._visualTranslations.delete(id); // Edited/swiped/re-generated.
+      return;
+    }
+    if (!cached.text) return;
+    this.renderer.updateMessageContent(
+      section, cached.text, section.dataset.reasoning || null,
+      section.classList.contains('user'), false, false,
+    );
+  }
+
+  setVisualTranslation(payloadJson) {
+    const { id, original, text } = JSON.parse(payloadJson);
+    const section = this._translationSection(id);
+    if (!section || section.dataset.rawText !== original) return;
+    this._visualTranslations.set(id, { original, text });
+    this._applyVisualTranslation(section);
+  }
+
+  clearVisualTranslation(id) {
+    this._visualTranslations.delete(id);
+    const section = this._translationSection(id);
+    if (!section) return;
+    this.renderer.updateMessageContent(
+      section, section.dataset.rawText || '', section.dataset.reasoning || null,
+      section.classList.contains('user'), false, false,
+    );
+  }
+
+  clearAllVisualTranslations() {
+    const ids = [...this._visualTranslations.keys()];
+    for (const id of ids) this.clearVisualTranslation(id);
+  }
+
   /* ---------- Message list API ---------- */
   setMessages(messagesJson, preserveScroll = false) {
     this.flush();
@@ -813,6 +861,7 @@ export class Bridge {
     for (const msg of messages) {
       const rendered = this.renderer.renderMessage(msg);
       for (const el of rendered) {
+        this._applyVisualTranslation(el);
         const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
         ids.push(id);
         elements.push(el);
@@ -830,6 +879,7 @@ export class Bridge {
   _renderAndAppend(msg) {
     const rendered = this.renderer.renderMessage(msg);
     for (const el of rendered) {
+      this._applyVisualTranslation(el);
       const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
       this.virtualList.append(id, el);
     }
@@ -874,6 +924,7 @@ export class Bridge {
       const rendered = this.renderer.renderMessage(msg);
       for (let j = rendered.length - 1; j >= 0; j--) {
         const el = rendered[j];
+        this._applyVisualTranslation(el);
         const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
         this.virtualList.prepend(id, el);
       }
@@ -999,6 +1050,7 @@ export class Bridge {
         animate,
       );
     }
+    this._applyVisualTranslation(section);
     this._imgGenTimer.ensureRunning();
 
     if (msg.isHidden !== undefined) {

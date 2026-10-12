@@ -37,6 +37,7 @@ import 'api_config_draft.dart';
 import 'context_budget_check.dart';
 import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
+import '../translation/translator_settings_panel.dart';
 import 'api_preset_selection_provider.dart';
 import 'api_preset_sort.dart';
 import 'tokenizer_labels.dart';
@@ -106,7 +107,7 @@ class ApiSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
-  late int _tab; // 0 = LLM, 1 = Studio agents, 2 = Embeddings
+  late int _tab; // 0 = LLM, 1 = Studio agents, 2 = Embeddings, 3 = Translator
 
   bool _showApiKey = false;
   bool _showEmbApiKey = false;
@@ -228,6 +229,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _llmScrollController = ScrollController();
   final _embScrollController = ScrollController();
   final _agentsScrollController = ScrollController();
+  final _translatorScrollController = ScrollController();
   Timer? _saveTimer;
   bool _loading = false;
 
@@ -347,6 +349,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _llmScrollController.dispose();
     _embScrollController.dispose();
     _agentsScrollController.dispose();
+    _translatorScrollController.dispose();
     for (final c in _ctrls) {
       c.dispose();
     }
@@ -753,27 +756,24 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       scrollController: switch (_tab) {
         0 => _llmScrollController,
         1 => _agentsScrollController,
-        _ => _embScrollController,
+        2 => _embScrollController,
+        _ => _translatorScrollController,
       },
       // The LLM/Agents/Embeddings switcher stays fixed in the header so it
       // never slides with the tab bodies — a single segmented control that
       // keeps its own pill animation while the content swipes beneath it.
       // The tab bar goes away only while there is nothing at all to configure;
       // an empty Embeddings list is the tab's own empty state, not the screen's.
-      headerBottom: list.isEmpty && embeddingList.isEmpty
-          ? null
-          : _buildTabBar(),
+      headerBottom: _buildTabBar(),
       // Until the sheet is on screen, only the spinner. See [_revealed].
       body: !_revealed
           ? const Center(child: GlazeSpinner())
           : asyncList.when(
               loading: () => const Center(child: GlazeSpinner()),
               error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
-              data: (list) => list.isEmpty && embeddingList.isEmpty
-                  ? _buildEmptyState(forEmbedding: false)
-                  : SwipeTabSwitcher(
+              data: (list) => SwipeTabSwitcher(
                       index: _tab,
-                      length: 3,
+                      length: 4,
                       onChanged: (i) => setState(() => _tab = i),
                       child: TabSlideSwitcher(
                         index: _tab,
@@ -786,7 +786,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                             controller: _agentsScrollController,
                             memoryBookSlotKey: _memoryBookSlotKey,
                           ),
-                          _ =>
+                          2 =>
                             embeddingList.isEmpty
                                 ? _buildEmptyState(forEmbedding: true)
                                 : _buildEmbeddingsTab(
@@ -794,6 +794,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                                     list,
                                     embeddingName,
                                   ),
+                          _ => TranslatorSettingsPanel(
+                            controller: _translatorScrollController,
+                          ),
                         },
                       ),
                     ),
@@ -830,6 +833,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           GlazeTabItem(
             label: 'tab_embeddings'.tr(),
             icon: Icons.layers_outlined,
+          ),
+          GlazeTabItem(
+            label: 'visual_translator_tab'.tr(),
+            icon: Icons.translate_outlined,
           ),
         ],
         activeIndex: _tab,

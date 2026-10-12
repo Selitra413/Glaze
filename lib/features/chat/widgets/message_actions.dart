@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +26,10 @@ void showMessageContextMenu({
   required bool canDeleteSwipe,
   required bool canDeleteAgentSwipe,
   Future<bool> Function()? beforeRegenerate,
+  VoidCallback? onTranslate,
+  VoidCallback? onShowOriginal,
+  bool isTranslated = false,
+  bool isTranslating = false,
 }) {
   // Notifier is read fresh inside each onTap callback instead of captured
   // here. If the provider is invalidated while the menu is open (e.g. by a
@@ -52,6 +57,21 @@ void showMessageContextMenu({
           onTap: () {
             Clipboard.setData(ClipboardData(text: content));
             Navigator.of(context, rootNavigator: true).pop();
+          },
+        ),
+      if (!isError && !isGenerating && onTranslate != null && !isUser)
+        BottomSheetItem(
+          icon: isTranslated ? Icons.translate_outlined : Icons.g_translate,
+          label: isTranslating
+              ? 'visual_translation_stop'.tr()
+              : isTranslated ? 'visual_translation_original'.tr() : 'visual_translation_translate'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            if (isTranslated || isTranslating) {
+              onShowOriginal?.call();
+            } else {
+              onTranslate?.call();
+            }
           },
         ),
       if (!isError && !isGenerating)

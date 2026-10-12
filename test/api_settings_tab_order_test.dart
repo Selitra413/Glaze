@@ -10,13 +10,14 @@ void main() {
     'lib/features/settings/api_settings_screen.dart',
   ).readAsStringSync();
 
-  test('the strip reads LLM, Agents, Embeddings', () {
+  test('the strip reads LLM, Agents, Embeddings, Translator', () {
     final llm = screen.indexOf("label: 'tab_llm'.tr()");
     final agents = screen.indexOf("label: 'studio_agents'.tr()");
     final embeddings = screen.indexOf("label: 'tab_embeddings'.tr()");
     expect(llm, greaterThan(-1));
     expect(agents, greaterThan(llm));
     expect(embeddings, greaterThan(agents));
+    expect(screen.indexOf("label: 'visual_translator_tab'.tr()"), greaterThan(embeddings));
   });
 
   test('the bodies follow the strip', () {
@@ -37,6 +38,7 @@ void main() {
 
   test('each tab scrolls its own list', () {
     expect(screen, contains('1 => _agentsScrollController,'));
-    expect(screen, contains('_ => _embScrollController,'));
+    expect(screen, contains('2 => _embScrollController,'));
+    expect(screen, contains('_ => _translatorScrollController,'));
   });
 }

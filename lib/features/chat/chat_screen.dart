@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import '../translation/translation_service.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
@@ -804,6 +805,91 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   bool _contextCardExpanded = false;
   bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
+  // Session-only translation state. Original content remains in the chat
+  // provider and database; only the WebView content host is temporarily redrawn.
+  final Map<String, CancelToken> _translationJobs = {};
+  final Map<String, String> _translatedSources = {};
+  int _translationEpoch = 0;
+
+  void _cancelTranslations() {
+    for (final token in _translationJobs.values) {
+      token.cancel('Translation cancelled');
+    }
+    _translationJobs.clear();
+    _translatedSources.clear();
+    _translationEpoch++;
+  }
+
+  void _showOriginal(String id) {
+    _translationJobs.remove(id)?.cancel('Original requested');
+    _translatedSources.remove(id);
+    unawaited(_webViewStateKey.currentState?.clearVisualTranslation(id) ?? Future.value());
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _translateMessage(String id, String original) async {
+    if (_translationJobs.containsKey(id)) return;
+    final requestedSessionId = widget.state.session?.id;
+    final epoch = _translationEpoch;
+    final config = await TranslatorConfig.load();
+    if (!mounted || epoch != _translationEpoch ||
+        widget.state.session?.id != requestedSessionId ||
+        _translationJobs.containsKey(id) ||
+        !widget.state.messages.any((message) => message.id == id)) return;
+    if (!config.isConfigured) {
+      GlazeToast.show(context,
+        'Укажите адрес API и модель на вкладке Translator в настройках API.',
+        isWarning: true);
+      return;
+    }
+    final sessionId = requestedSessionId;
+    final token = CancelToken();
+    _translationJobs[id] = token;
+    setState(() {});
+    var lastDraw = DateTime.fromMillisecondsSinceEpoch(0);
+    var latestText = '';
+    try {
+      await for (final text in TranslationService.translate(
+        config: config, source: original, cancelToken: token)) {
+        if (!mounted || token.isCancelled || epoch != _translationEpoch ||
+            widget.state.session?.id != sessionId) return;
+        latestText = text;
+        final now = DateTime.now();
+        if (now.difference(lastDraw).inMilliseconds < 55) continue;
+        lastDraw = now;
+        _translatedSources[id] = original;
+        await _webViewStateKey.currentState?.setVisualTranslation(id, original, text);
+      }
+      if (!mounted || token.isCancelled || epoch != _translationEpoch ||
+          widget.state.session?.id != sessionId) return;
+      if (latestText.isNotEmpty) {
+        _translatedSources[id] = original;
+        await _webViewStateKey.currentState?.setVisualTranslation(id, original, latestText);
+      }
+    } on DioException catch (e) {
+      if (!token.isCancelled && mounted && epoch == _translationEpoch) {
+        _translatedSources.remove(id);
+        await _webViewStateKey.currentState?.clearVisualTranslation(id);
+        if (mounted) {
+          GlazeToast.show(context,
+            'Ошибка перевода: ${e.response?.statusCode ?? e.message ?? e.type}',
+            isError: true);
+        }
+      }
+    } catch (e) {
+      if (!token.isCancelled && mounted && epoch == _translationEpoch) {
+        _translatedSources.remove(id);
+        await _webViewStateKey.currentState?.clearVisualTranslation(id);
+        if (mounted) GlazeToast.show(context, 'Ошибка перевода: $e', isError: true);
+      }
+    } finally {
+      if (identical(_translationJobs[id], token)) {
+        _translationJobs.remove(id);
+        if (mounted) setState(() {});
+      }
+    }
+  }
+
 
   /// Rects of the glass overlays (header + input bar elements) measured in
   /// WebView-local coordinates and mirrored into the WebView so the messages
@@ -854,6 +940,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   @override
   void didUpdateWidget(covariant _ChatBody oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.session?.id != widget.state.session?.id) {
+      _cancelTranslations();
+      unawaited(_webViewStateKey.currentState?.clearAllVisualTranslations() ?? Future.value());
+    }
     if (oldWidget.drawerCtrl != widget.drawerCtrl) {
       _bindDrawerListenable();
     }
@@ -1356,6 +1446,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _keyboardSettleTimer?.cancel();
+    _cancelTranslations();
     _blurRegistry.dispose();
     super.dispose();
   }
@@ -1912,6 +2003,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               .length >
                                           1,
                                   beforeRegenerate: _maybeSeedGameTime,
+                                  isTranslated: _translatedSources[messageId] == content,
+                                  isTranslating: _translationJobs.containsKey(messageId),
+                                  onTranslate: () => _translateMessage(messageId, content),
+                                  onShowOriginal: () => _showOriginal(messageId),
                                 );
                               },
                           onSwipe: (id, direction) {
