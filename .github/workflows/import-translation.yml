@@ -1,0 +1,62 @@
+name: Import AI translation changes
+on:
+  push:
+    branches:
+      - feat/streaming-ai-translation
+    paths:
+      - Glaze-translator-patch.zip
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork with full history
+        uses: actions/checkout@v4
+        with:
+          ref: feat/streaming-ai-translation
+          fetch-depth: 0
+      - name: Apply patch to exact original stable revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Glaze-translator-patch.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add --detach ../translation-base 0232e134c2e8ad375d2d458bf57e3f1ab58bb359
+          python3 - <<'PY'
+          import pathlib, zipfile
+          base = pathlib.Path('../translation-base').resolve()
+          with zipfile.ZipFile('Glaze-translator-patch.zip') as archive:
+              for member in archive.infolist():
+                  if member.is_dir():
+                      continue
+                  path = pathlib.PurePosixPath(member.filename)
+                  if not path.parts or path.parts[0] != 'Glaze-stable':
+                      raise ValueError(f'Unexpected ZIP member: {member.filename}')
+                  relative = pathlib.PurePosixPath(*path.parts[1:])
+                  if not relative.parts or relative.is_absolute() or '..' in relative.parts:
+                      raise ValueError(f'Unsafe ZIP member: {member.filename}')
+                  if str(relative) == 'TRANSLATOR_README_RU.md':
+                      continue
+                  target = base.joinpath(*relative.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(archive.read(member))
+          PY
+          git -C ../translation-base add -A
+          git -C ../translation-base diff --cached --check
+          git -C ../translation-base commit -m "feat(translation): implement streaming visual AI translation"
+          translation_commit=$(git -C ../translation-base rev-parse HEAD)
+          echo "Cherry-picking translation changes onto current nightly"
+          git cherry-pick --no-commit "$translation_commit" || {
+            git status --short
+            echo "::error::The stable patch conflicts with current nightly. Manual port needed; no changes were pushed."
+            exit 1
+          }
+          git rm -f -- Glaze-translator-patch.zip .github/workflows/import-translation.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "feat(translation): add streaming visual AI translation"
+          git push origin HEAD:feat/streaming-ai-translation
