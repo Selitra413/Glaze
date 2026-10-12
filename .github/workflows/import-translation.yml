@@ -107,9 +107,19 @@ jobs:
               s,n = re.subn(r'data: \(list\) => list\.isEmpty && embeddingList\.isEmpty\s*\? _buildEmptyState\(forEmbedding: false\)\s*: SwipeTabSwitcher\(', 'data: (list) => SwipeTabSwitcher(', s, count=1)
               assert n == 1, "Missing SwipeTabSwitcher anchor"
               s = swap(s, 'length: 3,', 'length: 4,')
-              s = swap(s, '                           _ =>\n                             embeddingList.isEmpty', '                           2 =>\n                             embeddingList.isEmpty')
-              s = swap(s, '                                     embeddingName,\n                                   ),\n                         },', '                                     embeddingName,\n                                   ),\n                           _ => TranslatorSettingsPanel(\n                             controller: _translatorScrollController,\n                           ),\n                         },')
-              s = swap(s, "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),", "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),\n           GlazeTabItem(\n             label: 'visual_translator_tab'.tr(),\n             icon: Icons.translate_outlined,\n           ),")
+              lines = s.splitlines(keepends=True)
+              arms = [i for i in range(len(lines)-1) if lines[i].strip() == '_ =>' and lines[i+1].strip() == 'embeddingList.isEmpty']
+              assert len(arms) == 1, 'Embeddings arm is missing or ambiguous'
+              arm = arms[0]
+              lines[arm] = lines[arm].replace('_ =>', '2 =>')
+              end = next(i for i in range(arm+1, len(lines)) if lines[i].strip() == '},')
+              pad = lines[end][:len(lines[end])-len(lines[end].lstrip())]
+              lines[end:end] = [pad + '  _ => TranslatorSettingsPanel(\n', pad + '    controller: _translatorScrollController,\n', pad + '  ),\n']
+              tab = next(i for i, line in enumerate(lines) if "label: 'tab_embeddings'.tr()," in line)
+              tab_end = next(i for i in range(tab+1, len(lines)) if lines[i].strip() == '),')
+              tab_pad = lines[tab_end][:len(lines[tab_end])-len(lines[tab_end].lstrip())]
+              lines[tab_end+1:tab_end+1] = [tab_pad + 'GlazeTabItem(\n', tab_pad + "  label: 'visual_translator_tab'.tr(),\n", tab_pad + '  icon: Icons.translate_outlined,\n', tab_pad + '),\n']
+              s = ''.join(lines)
               return s
 
           def test_port(s):
