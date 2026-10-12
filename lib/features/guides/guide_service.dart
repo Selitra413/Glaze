@@ -14,6 +14,7 @@ import 'guide_tour.dart';
 import 'tours/characters_tour.dart';
 import 'tours/chat_tour.dart';
 import 'tours/desktop_tour.dart';
+import 'tours/lorebook_capture_tour.dart';
 import 'tours/more_tour.dart';
 import 'tours/setup_tours.dart';
 import 'tours/tabs_tour.dart';
@@ -39,7 +40,10 @@ enum AppGuide {
   /// The desktop layout in one pass: the left sidebar, the Characters column
   /// and the Tools sidebar. On a computer all three are on screen at once, so
   /// it stands in for [tabs], [characters] and [tools] there.
-  desktop('guide_desktop_shown');
+  desktop('guide_desktop_shown'),
+
+  /// The JanitorAI lorebook capture sheet, run the first time it opens.
+  lorebookCapture('guide_lorebook_capture_shown');
 
   const AppGuide(this.shownKey, {this.route});
 
@@ -62,7 +66,8 @@ enum AppGuide {
     AppGuide.more ||
     AppGuide.api ||
     AppGuide.presets ||
-    AppGuide.personas => this,
+    AppGuide.personas ||
+    AppGuide.lorebookCapture => this,
   };
 
   List<GuideTourStep> get steps => switch (this) {
@@ -75,6 +80,7 @@ enum AppGuide {
     AppGuide.presets => presetsTourSteps(),
     AppGuide.personas => personasTourSteps(),
     AppGuide.desktop => desktopTourSteps(),
+    AppGuide.lorebookCapture => lorebookCaptureTourSteps(),
   };
 }
 
@@ -161,6 +167,11 @@ Future<void> replayGuide(BuildContext context, AppGuide guide) async {
     case AppGuide.chat:
       _arm(guide);
       GlazeToast.show(context, 'guides_chat_armed'.tr());
+    case AppGuide.lorebookCapture:
+      // The tour plays over the capture sheet, which is not on screen from
+      // here: re-arm it for the next time the extractor opens.
+      _arm(guide);
+      GlazeToast.show(context, 'guides_lorebook_armed'.tr());
     case AppGuide.api:
     case AppGuide.presets:
     case AppGuide.personas:

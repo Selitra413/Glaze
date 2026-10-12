@@ -53,6 +53,11 @@ Future<void> showGuidesList(BuildContext context) {
         icon: Icons.travel_explore_rounded,
         onTap: () => open(replayCatalogOnboarding),
       ),
+      guide(
+        AppGuide.lorebookCapture,
+        Icons.menu_book_rounded,
+        'guides_lorebook_capture',
+      ),
       if (!desktop)
         guide(AppGuide.tools, Icons.handyman_rounded, 'guides_tools'),
       guide(AppGuide.api, Icons.cloud_rounded, 'guides_api'),

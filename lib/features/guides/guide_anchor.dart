@@ -130,6 +130,10 @@ abstract final class GuideIds {
   static const personasFolder = 'personas.folder';
   static const personasRow = 'personas.row';
 
+  static const lorebookCapturePublic = 'lorebook.capture.public';
+  static const lorebookCaptureExtract = 'lorebook.capture.extract';
+  static const lorebookCaptureCollect = 'lorebook.capture.collect';
+
   static const desktopChats = 'desktop.chats';
   static const desktopCharacters = 'desktop.characters';
   static const desktopTools = 'desktop.tools';
