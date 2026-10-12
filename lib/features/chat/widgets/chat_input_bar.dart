@@ -12,6 +12,7 @@ import '../../../core/models/chat_message.dart' show maxMessageAttachments;
 import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../core/utils/text_insert.dart';
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
@@ -1399,8 +1400,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         widget.isPostGenRunning;
     // Gated on the drawer being open as well as on edit mode: with the drawer
     // shut there is nowhere for a demoted button to land, nothing on screen to
-    // drag into the send button, and no pencil to explain the badges.
-    final editing = widget.isDrawerOpen && ref.watch(chatDrawerEditingProvider);
+    // drag into the send button, and no pencil to explain the badges. On desktop
+    // the drawer never opens as a bottom sheet — it lives in the right sidebar,
+    // which is always there — so [isDrawerOpen] stays false and the pencil there
+    // would otherwise never reach the row.
+    final editing =
+        (widget.isDrawerOpen || isDesktopLayout(context)) &&
+        ref.watch(chatDrawerEditingProvider);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,

@@ -14,6 +14,7 @@ import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
 import 'package:glaze_flutter/features/chat/state/chat_drawer_editing_provider.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_input_bar.dart';
 import 'package:glaze_flutter/features/chat/widgets/input_bar.dart';
+import 'package:glaze_flutter/shared/shell/desktop/desktop_layout_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -805,6 +806,61 @@ void main() {
         ComposerPin.action(ComposerAction.guidance),
       );
       expect(find.byIcon(Icons.account_circle_rounded), findsNothing);
+    });
+
+    testWidgets('desktop keeps the row editable with the bottom drawer shut', (
+      tester,
+    ) async {
+      // On desktop the drawer is the right sidebar, which never opens as a
+      // bottom sheet, so `isDrawerOpen` stays false on the chat screen. The
+      // sidebar's own pencil still flips the shared edit-mode flag, and the row
+      // must honour it — otherwise nothing can be dragged into or along it.
+      Widget handle(String label, ComposerPin pin) => Draggable<ComposerPin>(
+        key: ValueKey(label),
+        data: pin,
+        feedback: const SizedBox(width: 20, height: 20),
+        child: const ColoredBox(
+          color: Color(0xFF00FF00),
+          child: SizedBox(width: 20, height: 20),
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: DesktopScope(
+                isDesktop: true,
+                child: Column(
+                  children: [
+                    handle(
+                      'reply',
+                      ComposerPin.action(ComposerAction.guidance),
+                    ),
+                    ChatInputBar(
+                      isGenerating: false,
+                      isDrawerOpen: false,
+                      onMagicDrawer: null,
+                      onSend: (_) async => true,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ChatInputBar)),
+      );
+      container.read(chatDrawerEditingProvider.notifier).state = true;
+      await tester.pumpAndSettle();
+
+      // The demote badge is edit mode's mark on a pinnable button; it is only
+      // built while the row is editable.
+      expect(find.byIcon(Icons.arrow_downward), findsWidgets);
     });
 
     testWidgets('edit mode kills the empty tap but not send or stop', (
