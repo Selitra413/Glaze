@@ -106,8 +106,7 @@ jobs:
               s = swap(s, "      headerBottom: list.isEmpty && embeddingList.isEmpty\n          ? null\n          : _buildTabBar(),", "      headerBottom: _buildTabBar(),")
               s,n = re.subn(r'data: \(list\) => list\.isEmpty && embeddingList\.isEmpty\s*\? _buildEmptyState\(forEmbedding: false\)\s*: SwipeTabSwitcher\(', 'data: (list) => SwipeTabSwitcher(', s, count=1)
               assert n == 1, "Missing SwipeTabSwitcher anchor"
-              s,n = re.subn(r'(?m)^(\\s*)length: 3,$', r'\\g<1>length: 4,', s, count=1)
-              assert n == 1, 'Missing swipe switcher length'
+              s = swap(s, 'length: 3,', 'length: 4,')
               s = swap(s, '                           _ =>\n                             embeddingList.isEmpty', '                           2 =>\n                             embeddingList.isEmpty')
               s = swap(s, '                                     embeddingName,\n                                   ),\n                         },', '                                     embeddingName,\n                                   ),\n                           _ => TranslatorSettingsPanel(\n                             controller: _translatorScrollController,\n                           ),\n                         },')
               s = swap(s, "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),", "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),\n           GlazeTabItem(\n             label: 'visual_translator_tab'.tr(),\n             icon: Icons.translate_outlined,\n           ),")
