@@ -106,29 +106,7 @@ jobs:
               s = swap(s, "      headerBottom: list.isEmpty && embeddingList.isEmpty\n          ? null\n          : _buildTabBar(),", "      headerBottom: _buildTabBar(),")
               s,n = re.subn(r'data: \(list\) => list\.isEmpty && embeddingList\.isEmpty\s*\? _buildEmptyState\(forEmbedding: false\)\s*: SwipeTabSwitcher\(', 'data: (list) => SwipeTabSwitcher(', s, count=1)
               assert n == 1, "Missing SwipeTabSwitcher anchor"
-              s,n = re.subn(r'(?m)^(\s*)length: 3,
-              s = swap(s, '                           _ =>\n                             embeddingList.isEmpty', '                           2 =>\n                             embeddingList.isEmpty')
-              s = swap(s, '                                     embeddingName,\n                                   ),\n                         },', '                                     embeddingName,\n                                   ),\n                           _ => TranslatorSettingsPanel(\n                             controller: _translatorScrollController,\n                           ),\n                         },')
-              s = swap(s, "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),", "             label: 'tab_embeddings'.tr(),\n             icon: Icons.layers_outlined,\n           ),\n           GlazeTabItem(\n             label: 'visual_translator_tab'.tr(),\n             icon: Icons.translate_outlined,\n           ),")
-              return s
-
-          def test_port(s):
-              s = swap(s, "test('the strip reads LLM, Agents, Embeddings',", "test('the strip reads LLM, Agents, Embeddings, Translator',")
-              s = swap(s, "    expect(embeddings, greaterThan(agents));", "    expect(embeddings, greaterThan(agents));\n    expect(screen.indexOf(\"label: 'visual_translator_tab'.tr()\"), greaterThan(embeddings));")
-              s = swap(s, "    expect(screen, contains('_ => _embScrollController,'));", "    expect(screen, contains('2 => _embScrollController,'));\n    expect(screen, contains('_ => _translatorScrollController,'));")
-              return s
-
-          amend('assets/chat_webview/bridge/chat_bridge_controller.js', js_port)
-          amend('lib/features/settings/api_settings_screen.dart', dart_port)
-          amend('test/api_settings_tab_order_test.dart', test_port)
-          PYMERGE
-          }
-          git rm -f -- Glaze-translator-patch.zip .github/workflows/import-translation.yml
-          git add -A
-          git diff --cached --check
-          git commit -m "feat(translation): add streaming visual AI translation"
-          git push origin HEAD:feat/streaming-ai-translation
-, r'\g<1>length: 4,', s, count=1)
+              s,n = re.subn(r'(?m)^(\\s*)length: 3,$', r'\\g<1>length: 4,', s, count=1)
               assert n == 1, 'Missing swipe switcher length'
               s = swap(s, '                           _ =>\n                             embeddingList.isEmpty', '                           2 =>\n                             embeddingList.isEmpty')
               s = swap(s, '                                     embeddingName,\n                                   ),\n                         },', '                                     embeddingName,\n                                   ),\n                           _ => TranslatorSettingsPanel(\n                             controller: _translatorScrollController,\n                           ),\n                         },')
