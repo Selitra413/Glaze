@@ -456,9 +456,10 @@ class _WindowFrame extends ConsumerWidget {
     final entry = ref.watch(
       shellHeaderProvider.select((e) => resolveShellHeader(e, headerBranch)),
     );
+    final config = entry?.config;
     final active = ref.watch(desktopSurfaceActiveProvider(surface));
-    final title = entry?.config.title ?? fallbackTitle ?? '';
-    final actions = <Widget>[...?entry?.config.actions, ...?fallbackActions];
+    final title = config?.title ?? fallbackTitle ?? '';
+    final actions = <Widget>[...?config?.actions, ...?fallbackActions];
 
     return Listener(
       // Same as a floating window: any press inside makes it the active one.
@@ -470,12 +471,19 @@ class _WindowFrame extends ConsumerWidget {
         titleBar: DesktopWindowMoveArea(
           child: DesktopWindowTitleBar(
             title: title,
-            titleWidget: entry?.config.titleWidget,
+            titleWidget: config?.titleWidget,
             actions: actions,
             active: active,
             maximized: maximized,
+            // A hosted screen that walks its own levels (the glossary:
+            // categories → terms → article) offers its back step here, ahead of
+            // anything else.
+            onBack: config != null && config.showBack ? config.onBack : null,
             onToggleMaximize: onToggleMaximize,
-            onClose: () => Navigator.of(context).maybePop(),
+            // pop(), not maybePop(): the close button closes the window even
+            // when the body has an inner level (a PopScope with canPop:false)
+            // that a *back* event would step out of first.
+            onClose: () => Navigator.of(context).pop(),
           ),
         ),
         child: DetachedShellHost(
