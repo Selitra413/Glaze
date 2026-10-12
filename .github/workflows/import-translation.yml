@@ -5,6 +5,7 @@ on:
       - feat/streaming-ai-translation
     paths:
       - Glaze-translator-patch.zip
+      - .github/workflows/import-translation.yml
   workflow_dispatch:
 permissions:
   contents: write
