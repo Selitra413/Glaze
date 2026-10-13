@@ -420,6 +420,39 @@ class ChatBridgeController {
   )?
   onPanelEvent;
 
+  /// Plugin runtime entry point for `glaze.*` calls relayed by
+  /// `assets/chat_webview/plugins/plugin_host.js`. The host stamps the
+  /// calling plugin's id on each request; null while no plugin runtime is
+  /// attached to this chat.
+  Future<Map<String, dynamic>> Function(Map<String, dynamic> request)?
+  onPluginRequest;
+
+  /// A message action rendered in the WebView failed
+  /// (`{pluginId, reason, message}`).
+  void Function(Map<String, dynamic> failure)? onPluginActionFailed;
+
+  /// A plugin frame loaded from, or was stopped from loading from, a host
+  /// (`{pluginId, host, blocked}`).
+  void Function(Map<String, dynamic> report)? onPluginNetwork;
+
+  /// Awaits a JS function body with [arguments] bound as parameters and
+  /// returns its resolved value. Null when the page is gone or the body threw.
+  Future<Object?> callAsyncJs(
+    String functionBody, {
+    Map<String, dynamic> arguments = const {},
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    try {
+      final result = await _controller
+          .callAsyncJavaScript(functionBody: functionBody, arguments: arguments)
+          .timeout(timeout);
+      if (result == null || result.error != null) return null;
+      return result.value;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   /// Register JS handlers for every callback declared on this host. The
   /// declarations live in [bridgeHandlers] (data-driven) so the actual
   /// dispatch table is short and auditable.
@@ -433,6 +466,40 @@ class ChatBridgeController {
             _dispatch(name, spec, data.args),
       );
     }
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginBridge',
+      callback: (JavaScriptHandlerFunctionData data) async {
+        final args = data.args;
+        final raw = args.isNotEmpty ? args.first : null;
+        final handler = onPluginRequest;
+        if (handler == null || raw is! Map) {
+          return const {
+            'ok': false,
+            'error': {
+              'code': 'runtime_unavailable',
+              'message': 'Plugins are not running in this chat',
+            },
+          };
+        }
+        return handler(Map<String, dynamic>.from(raw));
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginActionFailed',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginActionFailed?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'pluginNetwork',
+      callback: (JavaScriptHandlerFunctionData data) {
+        final raw = data.args.isNotEmpty ? data.args.first : null;
+        if (raw is Map) onPluginNetwork?.call(Map<String, dynamic>.from(raw));
+        return null;
+      },
+    );
     _controller.addJavaScriptHandler(
       handlerName: 'glazeBridge',
       callback: (JavaScriptHandlerFunctionData data) async {
