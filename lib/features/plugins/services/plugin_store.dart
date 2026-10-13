@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
@@ -109,16 +110,43 @@ class PluginStore {
           : const {},
       networkHosts: hosts is List ? {for (final h in hosts) '$h'} : null,
       localNetwork: record['localNetwork'] == true,
+      hubSlug: record['hub'] is String ? record['hub'] as String : null,
+      foundInCode: await _foundInCode(dir, manifest),
     );
   }
 
-  /// Grants and revocations saved before `library` was split up.
+  /// What a converted package uses without its manifest asking for it: its
+  /// permissions less those the original manifest converts to.
+  Future<Set<String>> _foundInCode(String dir, PluginManifest manifest) async {
+    if (manifest.compat != kTavoCompat) return const {};
+    try {
+      final original = File(p.join(dir, kTavoManifestFile));
+      final declared = PluginPermission.expand(
+        (convertTavoManifest(
+                  jsonDecode(await original.readAsString()),
+                )['permissions']
+                as List)
+            .cast<String>(),
+      );
+      return {
+        for (final x in manifest.permissions)
+          if (!declared.contains(x)) x,
+      };
+    } catch (e) {
+      debugPrint('[PluginStore] ${manifest.id} declared permissions: $e');
+      return const {};
+    }
+  }
+
+  /// Grants and revocations saved before `library` and `library.read` were
+  /// split up. A grant only matters for permissions that ask, so an old one
+  /// stands for those alone.
   static Set<String> _expandLegacy(Set<String> names, {required bool read}) {
-    if (!names.remove(PluginPermission.legacyLibrary)) return names;
+    final expanded = PluginPermission.expand(names);
+    if (read) return expanded;
     return {
-      ...names,
-      for (final p in [...PluginPermission.library, ...PluginPermission.chats])
-        if (read || PluginPermission.asking.contains(p)) p,
+      for (final p in expanded)
+        if (names.contains(p) || PluginPermission.asking.contains(p)) p,
     };
   }
 
@@ -126,13 +154,63 @@ class PluginStore {
   Future<PluginManifest> _readManifest(String dir) async {
     final own = File(p.join(dir, kPluginManifestFile));
     if (await own.exists()) {
-      return parsePluginManifest(jsonDecode(await own.readAsString()));
+      final json = jsonDecode(await own.readAsString());
+      if (json is Map<String, dynamic> && _hasLegacyLibrary(json)) {
+        return _reinfer(dir, own, json);
+      }
+      return parsePluginManifest(json);
     }
     final converted = convertTavoManifest(
       jsonDecode(await File(p.join(dir, kTavoManifestFile)).readAsString()),
     );
     await own.writeAsString(jsonEncode(converted));
     return parsePluginManifest(converted);
+  }
+
+  static const _legacy = {
+    PluginPermission.legacyLibrary,
+    PluginPermission.legacyLibraryRead,
+    PluginPermission.legacyLibraryCreate,
+    PluginPermission.legacyLibraryUpdate,
+    PluginPermission.legacyLibraryDelete,
+  };
+
+  static bool _hasLegacyLibrary(Map<String, dynamic> json) {
+    final permissions = json['permissions'];
+    return json['compat'] == kTavoCompat &&
+        permissions is List &&
+        permissions.any(_legacy.contains);
+  }
+
+  /// A converted package imported before library access was read off its
+  /// scripts kind by kind holds the old catch-all permission, which stands
+  /// for all of the library and chats. Its scripts are read again for what
+  /// it really uses, once; what else it holds stays.
+  Future<PluginManifest> _reinfer(
+    String dir,
+    File own,
+    Map<String, dynamic> json,
+  ) async {
+    final sources = <String>[];
+    await for (final f in Directory(dir).list(recursive: true)) {
+      if (f is File &&
+          RegExp(r'\.(m?js|html?)$', caseSensitive: false).hasMatch(f.path)) {
+        sources.add(await f.readAsString().catchError((_) => ''));
+      }
+    }
+    final scoped = {
+      ...PluginPermission.library,
+      ...PluginPermission.chats,
+      ..._legacy,
+    };
+    json['permissions'] = {
+      for (final x in (json['permissions'] as List).cast<String>())
+        if (!scoped.contains(x)) x,
+      ...inferTavoPermissions(sources).where(scoped.contains),
+    }.toList();
+    final manifest = parsePluginManifest(json);
+    await own.writeAsString(jsonEncode(json));
+    return manifest;
   }
 
   /// Clears every plugin's `files/tmp` (temporary files last one run).
@@ -161,8 +239,12 @@ class PluginStore {
   /// Unpacks [package], replacing an older version of the same plugin and
   /// keeping its settings and enabled state. A package whose author differs
   /// from the installed one's is not trusted as an update: it starts like a
-  /// fresh install and the old plugin's data goes.
-  Future<InstalledPlugin> install(PluginPackage package) async {
+  /// fresh install and the old plugin's data goes. [hubSlug] marks a package
+  /// downloaded from the hub; an update from a file keeps the mark.
+  Future<InstalledPlugin> install(
+    PluginPackage package, {
+    String? hubSlug,
+  }) async {
     final id = package.manifest.id;
     final staging = Directory(p.join(root, '.staging-$id'));
     if (await staging.exists()) await staging.delete(recursive: true);
@@ -219,6 +301,7 @@ class PluginStore {
           existing != null && !added.contains(PluginPermission.network)
           ? existing['localNetwork'] == true
           : false,
+      'hub': ?(hubSlug ?? existing?['hub']),
     };
     if (existing == null) {
       records.add(record);
@@ -245,6 +328,28 @@ class PluginStore {
       final dir = Directory(path);
       if (await dir.exists()) await dir.delete(recursive: true);
     }
+  }
+
+  /// Packs an installed package back into a zip, as it came in: a converted
+  /// package goes without the `plugin.json` Glaze wrote for it.
+  Future<Uint8List> exportPackage(String id) async {
+    final dir = Directory(packageDir(id));
+    final converted = await File(p.join(dir.path, kTavoManifestFile)).exists();
+    final archive = Archive();
+    final files = await dir
+        .list(recursive: true)
+        .where((e) => e is File)
+        .cast<File>()
+        .toList();
+    files.sort((a, b) => a.path.compareTo(b.path));
+    for (final file in files) {
+      final name = p.posix.joinAll(
+        p.split(p.relative(file.path, from: dir.path)),
+      );
+      if (converted && name == kPluginManifestFile) continue;
+      archive.addFile(ArchiveFile.bytes(name, await file.readAsBytes()));
+    }
+    return Uint8List.fromList(ZipEncoder().encode(archive));
   }
 
   /// Reads a file from an installed package; null when it is missing or the

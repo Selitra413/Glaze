@@ -7,17 +7,25 @@ import 'package:path/path.dart' as p;
 
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../shared/shell/shell_header_provider.dart';
+import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
+import '../../../core/services/file_export_service.dart';
+import '../compat/tavo/tavo_hub.dart';
+import '../compat/tavo/tavo_manifest_converter.dart';
 import '../models/installed_plugin.dart';
 import '../models/plugin_manifest.dart';
 import '../providers/plugin_history_provider.dart';
+import '../providers/plugin_hub_provider.dart';
 import '../providers/plugin_library_provider.dart';
 import '../providers/plugin_network_log_provider.dart';
+import 'plugin_history_screen.dart';
+import 'plugin_hub_sheet.dart';
 import 'plugin_settings_form.dart';
+import '../widgets/plugin_text_widgets.dart';
 
 Future<void> openPluginDetailScreen(BuildContext context, String id) async {
   final viewId = Uri(path: 'plugin-detail', queryParameters: {'id': id});
@@ -27,13 +35,21 @@ Future<void> openPluginDetailScreen(BuildContext context, String id) async {
   );
 }
 
-/// The rows that set up what [plugin] may do: a switch per permission, the
-/// ask/always/off choice for consents and the internet mode.
-List<Widget> pluginPermissionItems(
+/// Groups of rows that set up what [plugin] may do: a switch per
+/// permission, the ask/always/off choice for consents and the internet mode.
+/// The first group, headed [header], holds the general permissions and
+/// [afterNetwork] under the internet rows; variables, each kind of library
+/// item and other chats follow, each in a group of its own. Every group's
+/// header has a switch that gives or takes away all of its permissions.
+List<Widget> pluginPermissionGroups(
   BuildContext context,
   WidgetRef ref,
-  InstalledPlugin plugin,
-) {
+  InstalledPlugin plugin, {
+  required String header,
+  required IconData headerIcon,
+  String? description,
+  List<Widget> afterNetwork = const [],
+}) {
   final notifier = ref.read(pluginLibraryProvider.notifier);
   final order = PluginPermission.all.toList();
   int rank(String p) {
@@ -41,13 +57,25 @@ List<Widget> pluginPermissionItems(
     return i < 0 ? order.length : i;
   }
 
+  final rows = <_PermissionSection, List<Widget>>{};
+  final members = <_PermissionSection, List<String>>{};
   final permissions = [...plugin.manifest.permissions]
     ..sort((a, b) => rank(a).compareTo(rank(b)));
-  return [
-    for (final permission in permissions) ...[
-      PluginDetailScreen._permissionItem(context, notifier, plugin, permission),
+  for (final permission in permissions) {
+    final section = _PermissionSection.of(permission);
+    if (PluginPermission.all.contains(permission)) {
+      (members[section] ??= []).add(permission);
+    }
+    (rows[section] ??= []).addAll([
+      PluginDetailScreen._permissionItem(
+        context,
+        notifier,
+        plugin,
+        permission,
+        short: section.kind != null,
+      ),
       if (permission == PluginPermission.network &&
-          plugin.allows(PluginPermission.network))
+          plugin.allows(PluginPermission.network)) ...[
         MenuItem(
           icon: Icons.router_outlined,
           label: 'plugins_local_network'.tr(),
@@ -59,8 +87,75 @@ List<Widget> pluginPermissionItems(
           onTap: () =>
               notifier.setLocalNetwork(plugin.id, !plugin.localNetwork),
         ),
-    ],
+        ...afterNetwork,
+      ],
+    ]);
+  }
+
+  Widget? groupSwitch(_PermissionSection section) {
+    final list = members[section];
+    if (list == null || list.isEmpty) return null;
+    return GlazeSwitch(
+      value: list.every(plugin.allows),
+      onChanged: (v) => notifier.setPermissions(plugin.id, list, v),
+    );
+  }
+
+  return [
+    MenuGroup(
+      header: header,
+      headerIcon: headerIcon,
+      description: description,
+      headerTrailing: groupSwitch(_PermissionSection.general),
+      items: rows[_PermissionSection.general] ?? const [],
+    ),
+    for (final section in _PermissionSection.values.skip(1))
+      if (rows[section] case final items?)
+        MenuGroup(
+          header: section.kind == null
+              ? 'plugins_permission_group_${section.name}'.tr()
+              : 'plugins_permission_group_library'.tr(
+                  namedArgs: {
+                    'kind': 'plugins_permission_kind_${section.kind}'.tr(),
+                  },
+                ),
+          headerIcon: section.icon,
+          headerTrailing: groupSwitch(section),
+          items: items,
+        ),
   ];
+}
+
+enum _PermissionSection {
+  general(Icons.verified_user_outlined),
+  variables(Icons.data_object_rounded),
+  characters(Icons.person_outline_rounded, 'characters'),
+  personas(Icons.badge_outlined, 'personas'),
+  presets(Icons.tune_rounded, 'presets'),
+  lorebooks(Icons.menu_book_outlined, 'lorebooks'),
+  regex(Icons.code_rounded, 'regex'),
+  themes(Icons.palette_outlined, 'themes'),
+  chats(Icons.forum_outlined);
+
+  const _PermissionSection(this.icon, [this.kind]);
+
+  final IconData icon;
+
+  /// The library kind (`library.<action>.<kind>`) the group holds.
+  final String? kind;
+
+  static _PermissionSection of(String permission) {
+    if (permission == PluginPermission.variables ||
+        permission == PluginPermission.variablesShared) {
+      return variables;
+    }
+    if (PluginPermission.library.contains(permission)) {
+      final kind = permission.split('.').last;
+      return values.firstWhere((s) => s.kind == kind);
+    }
+    if (PluginPermission.chats.contains(permission)) return chats;
+    return general;
+  }
 }
 
 /// Shown after a plugin is installed or updated with new permissions:
@@ -88,32 +183,41 @@ class _PermissionsSheet extends ConsumerWidget {
     final notifier = ref.read(pluginLibraryProvider.notifier);
     final listed =
         PluginDetailScreen._networkMode(plugin) == PluginNetworkMode.listed;
-    return MenuGroup(
-      header: name,
-      headerIcon: Icons.extension_rounded,
-      description: 'plugins_permissions_sheet_body'.tr(),
-      items: [
-        ...pluginPermissionItems(context, ref, plugin),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: pluginPermissionGroups(
+        context,
+        ref,
+        plugin,
+        header: name,
+        headerIcon: Icons.extension_rounded,
+        description: [
+          'plugins_permissions_sheet_body'.tr(),
+          if (plugin.foundInCode.isNotEmpty)
+            'plugins_permissions_found_hint'.tr(),
+        ].join('\n\n'),
         // The hosts the plugin names, to switch on without leaving.
-        if (listed)
-          for (final host in {
-            ...plugin.manifest.hosts,
-            ...?plugin.networkHosts,
-          }.toList()..sort())
-            MenuItem(
-              icon: Icons.language_rounded,
-              label: host,
-              trailing: GlazeSwitch(
-                value: plugin.allowsHost(host),
-                onChanged: (v) => notifier.setHostAllowed(plugin.id, host, v),
+        afterNetwork: [
+          if (listed)
+            for (final host in {
+              ...plugin.manifest.hosts,
+              ...?plugin.networkHosts,
+            }.toList()..sort())
+              MenuItem(
+                icon: Icons.language_rounded,
+                label: host,
+                trailing: GlazeSwitch(
+                  value: plugin.allowsHost(host),
+                  onChanged: (v) => notifier.setHostAllowed(plugin.id, host, v),
+                ),
+                onTap: () => notifier.setHostAllowed(
+                  plugin.id,
+                  host,
+                  !plugin.allowsHost(host),
+                ),
               ),
-              onTap: () => notifier.setHostAllowed(
-                plugin.id,
-                host,
-                !plugin.allowsHost(host),
-              ),
-            ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -145,6 +249,13 @@ class PluginDetailScreen extends ConsumerWidget {
     final manifest = plugin.manifest;
     final notifier = ref.read(pluginLibraryProvider.notifier);
     final cover = manifest.icon;
+    final update = ref.watch(pluginHubUpdatesProvider).value?[plugin.id];
+    final description = manifest.description == null
+        ? ''
+        : localizer.resolve(manifest.description).trim();
+    final releaseNotes = manifest.releaseNotes == null
+        ? ''
+        : localizer.resolve(manifest.releaseNotes).trim();
 
     return GlazeScaffold(
       title: localizer.resolve(manifest.name),
@@ -172,7 +283,6 @@ class PluginDetailScreen extends ConsumerWidget {
           MenuGroup(
             header: 'plugins_about'.tr(),
             headerIcon: Icons.info_outline_rounded,
-            description: localizer.resolve(manifest.description),
             items: [
               MenuSwitchItem(
                 label: 'plugins_enabled'.tr(),
@@ -185,39 +295,61 @@ class PluginDetailScreen extends ConsumerWidget {
                 value: manifest.author ?? '—',
                 onTap: () {},
               ),
-              MenuItem(
-                icon: Icons.tag_rounded,
-                label: 'plugins_version'.tr(),
-                value: manifest.version,
-                onTap: () {},
+              if (description.isNotEmpty)
+                PluginDescriptionItem(text: description),
+              pluginVersionItem(
+                context,
+                version: manifest.version,
+                releaseNotes: releaseNotes.isEmpty ? null : releaseNotes,
               ),
+              if (plugin.hubSlug case final slug?)
+                MenuItem(
+                  icon: Icons.storefront_outlined,
+                  label: 'plugins_hub_source'.tr(),
+                  subtitle: update == null
+                      ? null
+                      : 'plugins_hub_update_available'.tr(
+                          namedArgs: {'version': update.version},
+                        ),
+                  onTap: () => openPluginHubLink(
+                    context,
+                    Uri.https(kTavoHubSite, '/plugins/$slug'),
+                  ),
+                ),
             ],
           ),
-          MenuGroup(
+          ...pluginPermissionGroups(
+            context,
+            ref,
+            plugin,
             header: 'plugins_permissions'.tr(),
             headerIcon: Icons.verified_user_outlined,
             description: manifest.permissions.isEmpty
                 ? 'plugins_permissions_none'.tr()
                 : null,
-            items: pluginPermissionItems(context, ref, plugin),
           ),
           _NetworkLog(plugin: plugin),
           _History(plugin: plugin),
           if (manifest.settings.isNotEmpty)
             PluginSettingsForm(plugin: plugin, localizer: localizer),
-          if (manifest.releaseNotes != null)
-            MenuGroup(
-              header: 'plugins_release_notes'.tr(),
-              headerIcon: Icons.new_releases_outlined,
-              description: localizer.resolve(manifest.releaseNotes),
-              items: const [],
-            ),
           MenuGroup(
             items: [
               MenuItem(
+                icon: Icons.ios_share_rounded,
+                label: 'plugins_export'.tr(),
+                subtitle: 'plugins_export_hint_${pluginExportFormat(plugin)}'
+                    .tr(),
+                onTap: () => exportPlugin(context, ref, plugin),
+              ),
+              MenuItem(
                 icon: Icons.delete_outline_rounded,
                 label: 'plugins_uninstall'.tr(),
-                onTap: () => _confirmUninstall(context, ref, plugin),
+                onTap: () => confirmPluginUninstall(
+                  context,
+                  ref,
+                  plugin,
+                  closeScreen: true,
+                ),
               ),
             ],
           ),
@@ -230,14 +362,16 @@ class PluginDetailScreen extends ConsumerWidget {
     PluginPermission.composer: Icons.edit_note_rounded,
     PluginPermission.messages: Icons.chat_bubble_outline_rounded,
     PluginPermission.variables: Icons.data_object_rounded,
+    PluginPermission.variablesShared: Icons.share_outlined,
     PluginPermission.files: Icons.folder_outlined,
     PluginPermission.generate: Icons.auto_awesome_outlined,
     PluginPermission.images: Icons.image_outlined,
     PluginPermission.network: Icons.public_rounded,
-    PluginPermission.libraryRead: Icons.library_books_outlined,
-    PluginPermission.libraryCreate: Icons.library_add_outlined,
-    PluginPermission.libraryUpdate: Icons.edit_outlined,
-    PluginPermission.libraryDelete: Icons.delete_outline_rounded,
+    // Library rows, by action.
+    'read': Icons.visibility_outlined,
+    'create': Icons.add_circle_outline_rounded,
+    'update': Icons.edit_outlined,
+    'delete': Icons.delete_outline_rounded,
     PluginPermission.chatsRead: Icons.forum_outlined,
     PluginPermission.chatsCreate: Icons.add_comment_outlined,
     PluginPermission.chatsUpdate: Icons.edit_note_rounded,
@@ -254,17 +388,28 @@ class PluginDetailScreen extends ConsumerWidget {
     BuildContext context,
     PluginLibraryNotifier notifier,
     InstalledPlugin plugin,
-    String permission,
-  ) {
-    final icon = _icons[permission] ?? Icons.help_outline_rounded;
+    String permission, {
+    bool short = false,
+  }) {
     final key = permission.replaceAll('.', '_');
-    final label = _text('plugins_permission_name_$key', permission);
+    // In a group of one library kind the row names just the action.
+    final action = short ? permission.split('.')[1] : null;
+    final icon = _icons[action ?? permission] ?? Icons.help_outline_rounded;
+    final label = action != null
+        ? 'plugins_permission_action_$action'.tr()
+        : _text('plugins_permission_name_$key', permission);
+    // A converted package names only some of what it uses; the rest was
+    // found in its scripts, and the user is told which is which.
+    final source = plugin.manifest.compat == null
+        ? null
+        : _SourceChip(found: plugin.foundInCode.contains(permission));
     final subtitle = _text('plugins_permission_$key', '');
     if (!PluginPermission.all.contains(permission)) {
       // Asked for, but nothing in Glaze provides it (e.g. Tavo's `tts`).
       return MenuItem(
         icon: icon,
         label: label,
+        badge: source,
         subtitle: subtitle.isEmpty ? null : subtitle,
         onTap: () {},
       );
@@ -278,6 +423,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
+        badge: source,
         subtitle: subtitle,
         value: 'plugins_consent_mode_${mode.name}'.tr(),
         onTap: () =>
@@ -289,6 +435,7 @@ class PluginDetailScreen extends ConsumerWidget {
       return MenuItem(
         icon: icon,
         label: label,
+        badge: source,
         subtitle: subtitle,
         value: 'plugins_network_mode_${mode.name}'.tr(),
         onTap: () => _pickNetworkMode(context, notifier, plugin, mode),
@@ -298,6 +445,7 @@ class PluginDetailScreen extends ConsumerWidget {
     return MenuItem(
       icon: icon,
       label: label,
+      badge: source,
       subtitle: subtitle,
       trailing: GlazeSwitch(
         value: allowed,
@@ -366,28 +514,70 @@ class PluginDetailScreen extends ConsumerWidget {
       ],
     );
   }
+}
 
-  void _confirmUninstall(
-    BuildContext context,
-    WidgetRef ref,
-    InstalledPlugin plugin,
-  ) {
-    GlazeBottomSheet.show<void>(
+/// Asks before [plugin] and everything it stored go; [closeScreen] also
+/// leaves the plugin's own screen afterwards.
+void confirmPluginUninstall(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin, {
+  bool closeScreen = false,
+}) {
+  GlazeBottomSheet.show<void>(
+    context,
+    title: 'plugins_uninstall'.tr(),
+    bigInfo: BottomSheetBigInfo(
+      icon: Icons.delete_outline_rounded,
+      description: 'plugins_uninstall_confirm'.tr(),
+      buttonText: 'plugins_uninstall'.tr(),
+      buttonIcon: Icons.delete_outline_rounded,
+      onButtonTap: () async {
+        Navigator.of(context, rootNavigator: true).pop();
+        await ref.read(pluginLibraryProvider.notifier).uninstall(plugin.id);
+        if (closeScreen && context.mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      },
+    ),
+  );
+}
+
+/// The format [plugin] is exported in: its own app's.
+String pluginExportFormat(InstalledPlugin plugin) =>
+    plugin.manifest.compat == kTavoCompat ? 'tpg' : 'glzp';
+
+/// Packs [plugin] back into a file and saves it.
+Future<void> exportPlugin(
+  BuildContext context,
+  WidgetRef ref,
+  InstalledPlugin plugin,
+) async {
+  try {
+    final store = await ref.read(pluginStoreProvider.future);
+    final bytes = await store.exportPackage(plugin.id);
+    final ext = pluginExportFormat(plugin);
+    final base = '${plugin.id}-${plugin.manifest.version}'.replaceAll(
+      RegExp(r'[^A-Za-z0-9._-]'),
+      '_',
+    );
+    final path = await FileExportService.exportBytes(
+      bytes: bytes,
+      filename: '$base.$ext',
+      subfolder: 'plugins',
+    );
+    if (path.isEmpty || !context.mounted) return;
+    GlazeToast.show(
       context,
-      title: 'plugins_uninstall'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline_rounded,
-        description: 'plugins_uninstall_confirm'.tr(),
-        buttonText: 'plugins_uninstall'.tr(),
-        buttonIcon: Icons.delete_outline_rounded,
-        onButtonTap: () async {
-          Navigator.of(context, rootNavigator: true).pop();
-          await ref.read(pluginLibraryProvider.notifier).uninstall(plugin.id);
-          if (context.mounted && Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
-          }
-        },
-      ),
+      'plugins_exported_toast'.tr(namedArgs: {'path': path}),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    GlazeToast.show(
+      context,
+      'plugins_export_failed'.tr(namedArgs: {'error': '$e'}),
+      isError: true,
+      showCopyButton: true,
     );
   }
 }
@@ -535,6 +725,7 @@ class _NetworkLog extends ConsumerWidget {
 }
 
 /// What the plugin tried and was not allowed to do.
+/// The row opening the plugin's request history, with what it holds.
 class _History extends ConsumerWidget {
   const _History({required this.plugin});
 
@@ -542,36 +733,74 @@ class _History extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final denied =
-        ref.watch(pluginHistoryProvider(plugin.id)).value ?? const {};
-    if (denied.isEmpty) return const SizedBox.shrink();
-    final entries = denied.values.toList()
-      ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
-    final format = DateFormat.MMMd(context.locale.toLanguageTag()).add_Hm();
+    final records =
+        ref.watch(pluginHistoryProvider(plugin.id)).value?.values ??
+        const <PluginRequestRecord>[];
+    final denied = records.where((r) => r.denied > 0).length;
+    final allowed = records.where((r) => r.allowed > 0).length;
     return MenuGroup(
-      header: 'plugins_history'.tr(),
-      headerIcon: Icons.history_rounded,
-      description: 'plugins_history_hint'.tr(),
       items: [
-        for (final d in entries)
-          MenuItem(
-            icon: Icons.block_rounded,
-            label: PluginDetailScreen._text(d.action, d.action),
-            subtitle: 'plugins_history_count'.tr(
-              namedArgs: {'count': '${d.count}'},
-            ),
-            value: format.format(
-              DateTime.fromMillisecondsSinceEpoch(d.lastSeen),
-            ),
-            onTap: () {},
-          ),
         MenuItem(
-          icon: Icons.delete_sweep_outlined,
-          label: 'plugins_history_clear'.tr(),
-          onTap: () =>
-              ref.read(pluginHistoryProvider(plugin.id).notifier).clear(),
+          icon: Icons.history_rounded,
+          label: 'plugins_history_title'.tr(),
+          subtitle: records.isEmpty
+              ? 'plugins_history_empty_short'.tr()
+              : 'plugins_history_summary'.tr(
+                  namedArgs: {'allowed': '$allowed', 'denied': '$denied'},
+                ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          onTap: () => openPluginHistoryScreen(context, plugin.id),
         ),
       ],
+    );
+  }
+}
+
+/// Marks a converted plugin's permission as asked for by the plugin or found
+/// in its code; the second stands out, as nothing in the plugin said so.
+class _SourceChip extends StatelessWidget {
+  const _SourceChip({required this.found});
+
+  final bool found;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = found ? const Color(0xFFE8A33D) : context.cs.primary;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 2, 8, 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            found ? Icons.code_rounded : Icons.check_rounded,
+            size: 13,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              found
+                  ? 'plugins_permission_found_in_code'.tr()
+                  : 'plugins_permission_declared'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

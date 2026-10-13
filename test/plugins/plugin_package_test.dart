@@ -214,9 +214,9 @@ void main() {
           'tavo.chat.copy(id)',
         ]),
         {
-          'library.read',
-          'library.create',
-          'library.update',
+          'library.read.characters',
+          'library.create.lorebooks',
+          'library.update.themes',
           'chats.delete',
           'chats.create',
           'chats.read',
@@ -238,7 +238,7 @@ void main() {
       expect(m.defaultLocale, 'en');
       expect(m.permissions, containsAll(['composer', 'variables', 'tts']));
       // Library and chat access is read off the scripts, not granted.
-      expect(m.permissions, isNot(contains('library.read')));
+      expect(m.permissions, isNot(contains('library.read.characters')));
       expect(m.permissions, isNot(contains('images')));
       expect(m.composerActions.single.id, 'note');
       expect(m.toolsActions.single.id, 'open');
@@ -375,12 +375,98 @@ void main() {
       ),
     );
 
+    test(
+      'a converted package tells declared permissions from found ones',
+      () async {
+        final installed = await store.install(
+          readPluginPackage(
+            zip(
+              packageFiles(
+                manifestFile: 'manifest.json',
+                main: 'tavo.character.get(1); tavo.lorebook.create({});',
+              ),
+            ),
+          ),
+        );
+        expect(installed.foundInCode, {
+          'library.read.characters',
+          'library.create.lorebooks',
+        });
+        expect(
+          installed.manifest.permissions,
+          containsAll(['composer', 'variables']),
+        );
+        // The same after a reload.
+        expect(
+          (await store.loadAll()).single.foundInCode,
+          installed.foundInCode,
+        );
+      },
+    );
+
+    test(
+      'an old catch-all library permission is read off the scripts again',
+      () async {
+        final installed = await store.install(
+          readPluginPackage(
+            zip(
+              packageFiles(
+                manifestFile: 'manifest.json',
+                main: 'tavo.persona.current(); tavo.chat.delete(1);',
+              ),
+            ),
+          ),
+        );
+        final file = File('${store.packageDir(installed.id)}/plugin.json');
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        json['permissions'] = [
+          ...(json['permissions'] as List).where(
+            (x) => !'$x'.startsWith('library') && !'$x'.startsWith('chats'),
+          ),
+          'library',
+          'images',
+        ];
+        await file.writeAsString(jsonEncode(json));
+
+        final reloaded = (await store.loadAll()).single;
+        expect(
+          reloaded.manifest.permissions,
+          containsAll([
+            'composer',
+            'variables',
+            'images',
+            'library.read.personas',
+            'chats.delete',
+          ]),
+        );
+        expect(
+          reloaded.manifest.permissions,
+          isNot(contains('library.read.characters')),
+        );
+        expect(
+          reloaded.manifest.permissions,
+          isNot(contains('library.delete.characters')),
+        );
+        // Written back: the next load reads it as it is.
+        expect(await file.readAsString(), isNot(contains('"library"')));
+      },
+    );
+
+    test('a Glaze package declares everything it asks for', () async {
+      final installed = await store.install(package(['composer']));
+      expect(installed.foundInCode, isEmpty);
+    });
+
     test('a fresh install starts with every permission off', () async {
       final installed = await store.install(
         package(['composer', 'network', 'library']),
       );
       expect(installed.revoked, installed.manifest.permissions.toSet());
-      expect(installed.revoked, containsAll(['library.read', 'chats.delete']));
+      expect(
+        installed.revoked,
+        containsAll(['library.read.characters', 'chats.delete']),
+      );
       expect(installed.networkHosts, isEmpty);
       expect(installed.localNetwork, isFalse);
       expect(installed.allowsHost('api.example.com'), isFalse);

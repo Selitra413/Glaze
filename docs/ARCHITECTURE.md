@@ -1638,12 +1638,18 @@ Code lives in `lib/features/plugins/` and `assets/chat_webview/plugins/`.
 `plugin_manifest_parser.dart`; `readPluginPackage` also checks that every
 referenced file exists and that no path escapes the package.
 
-**Permissions** (`PluginPermission`): `composer`, `messages`, `variables`,
+**Permissions** (`PluginPermission`): `composer`, `messages`, `variables`
+(the plugin's own: chat, message and global scopes), `variables.shared` (the
+`shared` scope; the variables methods check the scope they are given),
 `files`, `generate`, `images`, `network`, and the library and chats split by
-what is done: `library.read|create|update|delete` (characters, personas,
-presets, lorebooks, regex scripts, themes) and `chats.read|create|update|delete`
-(chats other than the open one; the open one is `messages`). A format 1
-manifest's old `library` stands for all eight. The manifest lists what a plugin
+what is done. Reading the library is one permission per kind,
+and so is changing it: `library.<read|create|update|delete>.<kind>` with
+kind `characters|personas|presets|lorebooks|regex|themes`; other chats are
+`chats.read|create|update|delete` (the open one is `messages`). Older
+manifests and saved settings are expanded on load
+(`PluginPermission.expand`): `library.read|create|update|delete` stands for
+that action on every kind, a format 1 manifest's `library` for all of the
+library and chats. The manifest lists what a plugin
 asks for; the user can take any of them away on the plugin's detail screen
 (`InstalledPlugin.revoked`), and `InstalledPlugin.allows` is the one check the
 bridge, the frame policy and the events use. The SDK still builds methods
@@ -1651,11 +1657,16 @@ whose permission was taken away, so a call reaches the app and is refused
 there. Creating, changing and deleting (`PluginPermission.asking`) and image
 generation also ask through a consent sheet: allow once, always allow
 (`InstalledPlugin.grants`) or deny, which switches the permission off; on the
-detail screen each is Ask, Always or Off. Every refusal (`permission_denied`)
-goes through `PluginBridgeService._require`: it is counted in the plugin's
-history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`, shown as
-"Not allowed" on the detail screen) and the user gets one toast per plugin and
-action until the app restarts; a refused plugin is never asked again. Toasts
+detail screen each is Ask, Always or Off. Every permission check goes
+through `PluginBridgeService._require` and is counted in the plugin's request
+history (`pluginHistoryProvider`, `plugin_data/<id>/history.json`: per action,
+how often it was let through and how often not, and when last), shown on its
+own screen (`PluginHistoryScreen`) opened from the detail screen, filtered by
+answer and by kind of permission (`PluginPermissionCategory`; each record
+keeps the permission it was checked against). On a refusal
+(`permission_denied`) the user also gets one toast per plugin and action until
+the app restarts; a refused plugin is never asked again. A dismissed consent
+sheet counts as not allowed without a toast. Toasts
 and the select/ask sheets a plugin opens are signed with its name
 (`GlazeToast.show(source:)`, `GlazeBottomSheet.show(source:)`), so a plugin
 cannot pass a question off as the app's. Hooks
@@ -1729,7 +1740,8 @@ Variables are per plugin: chat scope in
 `'__plugin_message_variables:<id>'` (dropped with the message), global scope
 in `plugin_data/<id>/variables.json`; the `shared` scope
 (`plugin_data/_shared_variables.json`) is the one plugins use together. Only
-the owner's frames get its values pushed, and only with `variables`. An
+the owner's frames get its values pushed, and only with `variables`; the
+`shared` scope needs `variables.shared`. An
 uninstall drops its chat variables (`PluginVariableStore.forgetPlugin`). All
 are separate from block variables.
 
@@ -1755,7 +1767,12 @@ from the frame that was asked. `PluginBridgeService` rejects disabled
 plugins and methods whose permission is missing or switched off;
 `plugin_sdk.js` only builds the methods the manifest asks for into `glaze`. Chat panels cover the page but are
 clipped (`clip-path`) to the boxes the plugin draws, so the chat keeps its
-taps; message panels sit in `.msg-content-stack`, message actions in the
+taps. The same boxes go to the app (`pluginHoles` → `PluginHoles`), and the
+Flutter controls over the page (header, message box, buttons) are cut out
+there by `PluginHolesCutter`: panels are laid out for the whole screen, so
+what they draw shows, and takes taps, over the app's own chrome. Frames
+inside the page may only load `about:srcdoc`/`about:blank`
+(`chatWebViewNavigationPolicy`); iOS asks about those too. Message panels sit in `.msg-content-stack`, message actions in the
 footer's `.msg-trailing-actions`. Package scripts, CSS and assets
 (`/plugins/<id>/…`) are inlined by `plugin_html_inliner.dart`, since a
 null-origin frame cannot fetch them. Layout insets are exposed as
@@ -1789,13 +1806,36 @@ chat bridge is published and registers a `PluginHookRunner` in
 conversion are converted on load. Tavo lets every plugin read the library and
 asks before writes, so its manifests do not say which a plugin uses; the
 library, chats, images and `messages` permissions are read off the package's
-scripts (`inferTavoPermissions`) and, like the rest, start off. For converted
+scripts (`inferTavoPermissions`) and, like the rest, start off. Which were
+found that way is worked out again on load from the original manifest
+(`InstalledPlugin.foundInCode`), and the permission rows mark each as asked
+for by the extension or found in its code. A converted package imported
+before the split still holding the catch-all `library` (or `library.read`) has
+its scripts read again once on load (`PluginStore._reinfer`), so it ends up
+with the exact library and chat permissions it uses. The permission rows are
+grouped: general, variables, one group per library kind, other chats
+(`pluginPermissionGroups`); each group's header switch gives or takes away
+all of it (`PluginLibraryNotifier.setPermissions`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
 `triggerSlash`) on top of `glaze.*` and then removes `glaze`, maps
 `input:beforeSend|afterSend` onto `send:*`, reports Tavo's version from
 `tavo.app` and sets the `--tavo-inset-*` variables instead of Glaze's. TTS is not supported: importing a package that asks
 for `tts` or calls `tavo.tts`/`glaze.tts` shows a warning sheet first
 (`plugin_compatibility.dart`).
+
+**Tavo Hub links** (`compat/tavo/tavo_hub.dart`, `screens/plugin_hub_sheet.dart`).
+A `hub.tavoai.dev` plugin page opens as a sheet instead of the browser: from
+"Install from a link" on the Plugins screen, links tapped in chats and
+descriptions (`openPluginHubLinkInApp`), and on Android the system's VIEW
+intent (an unverified filter, routed through `DeepLinkService.setWebLinkHandler`).
+The sheet reads the plugin from the hub's public API, downloads the package
+only from the hub's hosts, checks its sha256 and package id, and installs it
+through the same prompts as a file (`installPluginPackage`). Such installs keep
+the slug (`hub` in the registry, `InstalledPlugin.hubSlug`);
+`pluginHubUpdatesProvider` looks them up once per run and the list and plugin
+screen offer the update. Any plugin can be exported back to a file in its own
+format: `.tpg` for converted ones (without the generated `plugin.json`),
+`.glzp` otherwise (`PluginStore.exportPackage`).
 
 ## 10. Known Design Issues
 

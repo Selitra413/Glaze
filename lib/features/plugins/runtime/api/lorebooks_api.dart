@@ -3,6 +3,7 @@ import '../../../../core/models/lorebook.dart';
 import '../../../../core/services/st_lorebook_exporter.dart';
 import '../../../../core/state/lorebook_provider.dart';
 import '../../../../core/utils/id_generator.dart';
+import '../../models/plugin_manifest.dart';
 import '../plugin_api.dart';
 import 'library_io.dart';
 import 'shapes.dart';
@@ -11,14 +12,30 @@ import 'shapes.dart';
 /// SillyTavern World Info and `character_book`). Attach a book to a chat
 /// with `glaze.chats.update({ lorebooks })`.
 Map<String, PluginMethod> lorebooksApi() => {
-  'lorebooks.list': libraryRead(_list),
-  'lorebooks.get': libraryRead(_get),
-  'lorebooks.find': libraryRead(_find),
-  'lorebooks.create': libraryCreate(_create, 'plugins_consent_lorebook_create'),
-  'lorebooks.update': libraryUpdate(_update, 'plugins_consent_lorebook_update'),
-  'lorebooks.remove': libraryDelete(_remove, 'plugins_consent_lorebook_remove'),
-  'lorebooks.import': libraryCreate(_import, 'plugins_consent_lorebook_import'),
-  'lorebooks.export': libraryRead(_export),
+  'lorebooks.list': libraryRead(PluginPermission.lorebooksRead, _list),
+  'lorebooks.get': libraryRead(PluginPermission.lorebooksRead, _get),
+  'lorebooks.find': libraryRead(PluginPermission.lorebooksRead, _find),
+  'lorebooks.create': libraryCreate(
+    PluginPermission.lorebooksCreate,
+    _create,
+    'plugins_consent_lorebook_create',
+  ),
+  'lorebooks.update': libraryUpdate(
+    PluginPermission.lorebooksUpdate,
+    _update,
+    'plugins_consent_lorebook_update',
+  ),
+  'lorebooks.remove': libraryDelete(
+    PluginPermission.lorebooksDelete,
+    _remove,
+    'plugins_consent_lorebook_remove',
+  ),
+  'lorebooks.import': libraryCreate(
+    PluginPermission.lorebooksCreate,
+    _import,
+    'plugins_consent_lorebook_import',
+  ),
+  'lorebooks.export': libraryRead(PluginPermission.lorebooksRead, _export),
 };
 
 Future<List<Lorebook>> _all(PluginCall c) =>

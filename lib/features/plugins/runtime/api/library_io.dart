@@ -38,28 +38,29 @@ Future<Object?> exportJson(
 
 String? refId(Object? v) => (v is Map ? v['id'] : v)?.toString();
 
-/// Library method reading characters, personas, presets, lorebooks, regex
-/// scripts or themes.
-PluginMethod libraryRead(PluginOperation run) =>
-    PluginMethod(run, permission: PluginPermission.libraryRead);
+/// Library method reading one kind of item; [permission] is that kind's
+/// read permission.
+PluginMethod libraryRead(String permission, PluginOperation run) =>
+    PluginMethod(run, permission: permission);
 
-/// Library method that adds things.
-PluginMethod libraryCreate(PluginOperation run, String summary) => PluginMethod(
-  run,
-  permission: PluginPermission.libraryCreate,
-  summary: summary,
-);
+/// Library method that adds things of one kind; [permission] is that kind's
+/// create permission.
+PluginMethod libraryCreate(
+  String permission,
+  PluginOperation run,
+  String summary,
+) => PluginMethod(run, permission: permission, summary: summary);
 
-/// Library method that changes things.
-PluginMethod libraryUpdate(PluginOperation run, String summary) => PluginMethod(
-  run,
-  permission: PluginPermission.libraryUpdate,
-  summary: summary,
-);
+/// Library method that changes things of one kind.
+PluginMethod libraryUpdate(
+  String permission,
+  PluginOperation run,
+  String summary,
+) => PluginMethod(run, permission: permission, summary: summary);
 
-/// Library method that deletes things.
-PluginMethod libraryDelete(PluginOperation run, String summary) => PluginMethod(
-  run,
-  permission: PluginPermission.libraryDelete,
-  summary: summary,
-);
+/// Library method that deletes things of one kind.
+PluginMethod libraryDelete(
+  String permission,
+  PluginOperation run,
+  String summary,
+) => PluginMethod(run, permission: permission, summary: summary);

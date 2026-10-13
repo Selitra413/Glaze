@@ -57,12 +57,16 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
   Future<InstalledPlugin> install(Uint8List bytes) =>
       installPackage(readPluginPackage(bytes));
 
-  /// Installs a package already read with [readPluginPackage].
-  Future<InstalledPlugin> installPackage(PluginPackage package) async {
+  /// Installs a package already read with [readPluginPackage]; [hubSlug]
+  /// when it came from the hub.
+  Future<InstalledPlugin> installPackage(
+    PluginPackage package, {
+    String? hubSlug,
+  }) async {
     final previous = (state.value ?? const <InstalledPlugin>[])
         .where((x) => x.id == package.manifest.id)
         .firstOrNull;
-    final installed = await (await _store).install(package);
+    final installed = await (await _store).install(package, hubSlug: hubSlug);
     // Another author's package starts over; what the old plugin kept in
     // chats is not its to read.
     if (previous != null &&
@@ -119,6 +123,22 @@ class PluginLibraryNotifier extends AsyncNotifier<List<InstalledPlugin>> {
           grants: allowed ? null : ({...x.grants}..remove(permission)),
         ),
       );
+
+  /// Gives back or takes away every one of [permissions] at once; a
+  /// permission that asks comes back as Ask.
+  Future<void> setPermissions(
+    String id,
+    Iterable<String> permissions,
+    bool allowed,
+  ) => _update(
+    id,
+    (x) => x.copyWith(
+      revoked: allowed
+          ? ({...x.revoked}..removeAll(permissions))
+          : {...x.revoked, ...permissions},
+      grants: allowed ? null : ({...x.grants}..removeAll(permissions)),
+    ),
+  );
 
   /// Off takes `network` away; listed keeps it to [InstalledPlugin.networkHosts]
   /// (the manifest's hosts show up switched off); any lets it reach every
