@@ -1733,7 +1733,11 @@ grants. Plugin-owned data (the `localStorage` shim, `glaze.files.*` with
 `chat`, `global` and `tmp` scopes) lives in `<data>/plugin_data/<id>/`;
 `files/tmp` is cleared on start, a chat's `files/chat/<session>` goes with the
 chat (session ids are reused), scopes other than those three are refused, and
-all files of one plugin together are capped at 256 MB. `readPluginPackage`
+all files of one plugin together are capped at 256 MB. The `localStorage`
+shim holds 10 MB per plugin (keys and values in UTF-8, the app's count); a
+write past that throws `QuotaExceededError` in the frame, as a full browser
+storage does, instead of failing later in the app. Variables are capped at
+1 MB per chat and 16 MB for `global` and `shared`. `readPluginPackage`
 checks the sizes and file count the zip declares before inflating anything.
 Variables are per plugin: chat scope in
 `ChatSession.sessionVars['__plugin_variables:<id>']`, per-message scope in
@@ -1813,7 +1817,7 @@ for by the extension or found in its code. A converted package imported
 before the split still holding the catch-all `library` (or `library.read`) has
 its scripts read again once on load (`PluginStore._reinfer`), so it ends up
 with the exact library and chat permissions it uses. The permission rows are
-grouped: general, variables, one group per library kind, other chats
+grouped: general, variables, the library, other chats
 (`pluginPermissionGroups`); each group's header switch gives or takes away
 all of it (`PluginLibraryNotifier.setPermissions`). For converted
 plugins the runtime also loads `tavo_compat.js`, which defines `tavo.*` (and
