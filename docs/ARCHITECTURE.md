@@ -1121,7 +1121,24 @@ always-on capture sink (`llmRequestCaptureInstallationProvider` →
 not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
 main model or the agent shards, then cleaner, ledger, ext blocks) or by
 `pipelineRunId` (a background job — card rewrite, reconciliation), and the two
-kinds share one chronological list. Retries of one call collapse into a single
+kinds share one chronological list. Plugin calls (`glaze.generate`,
+`glaze.images.generate`) carry the open chat, a stage of their own
+(`plugin.generate`, `image.plugin`) and the plugin's id as the step name, and
+record their outcome, so each shows as a call of its own with its response.
+A plugin's HTTP requests show too, under `plugin.net` with the plugin, method
+and address as the step name (`plugin_request_capture.dart`):
+`glaze.net.fetch` and downloads by URL (`fetchForPlugin`: files saved from a
+URL, image previews) record them in Dart, and the SDK's network watch reports
+every `fetch`, XHR, beacon, WebSocket and EventSource call its frame makes
+(`req` → host → `pluginHttp`), reading a clone of the response so the
+plugin's own read is untouched. A JSON body with chat messages, Gemini
+`contents` or a `prompt` shows as those messages; credentials in headers and
+query parameters are hidden; bodies are cut at 200,000 characters. These rows
+have a budget of their own (`maxPluginRequestsPerSession`), so a plugin
+polling a server does not evict the chat's model requests. Resources a page
+loads (images, scripts) are only in the plugin's network log. The watch is a
+view, not a boundary: code in the frame can reach unwrapped functions (a
+nested frame, a worker) and send unseen, still under the frame's policy. Retries of one call collapse into a single
 step carrying an attempt count. Opening a step shows that exact payload; the tab
 strip hides while it is open, and the step gets two tabs of its own: what was
 sent, and what came back (`PromptCaptureView.responseText`, read from the call

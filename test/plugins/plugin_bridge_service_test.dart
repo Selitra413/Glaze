@@ -5,11 +5,17 @@ import 'dart:typed_data';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/llm_request_capture_repo.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
+import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_text_bridge.dart';
+import 'package:glaze_flutter/features/chat/services/prompt_capture_view_service.dart';
 import 'package:glaze_flutter/features/plugins/models/installed_plugin.dart';
 import 'package:glaze_flutter/features/plugins/models/plugin_manifest.dart';
 import 'package:glaze_flutter/features/plugins/providers/plugin_library_provider.dart';
@@ -17,6 +23,7 @@ import 'package:glaze_flutter/features/plugins/runtime/plugin_api.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_bridge_service.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_file_store.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_network.dart';
+import 'package:glaze_flutter/features/plugins/runtime/plugin_request_capture.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_html_inliner.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_message_diff.dart';
 import 'package:glaze_flutter/features/plugins/runtime/plugin_variable_store.dart';
@@ -221,6 +228,31 @@ void main() {
     String pluginId = 'test.plugin',
   ]) => s.dispatch({'pluginId': pluginId, 'method': method, 'params': params});
 
+  /// Stores captured requests in the test database, as the app does, and
+  /// returns what the Prompt Inspector reads for the chat once every one
+  /// has its outcome.
+  Future<List<PromptCaptureView>> Function() captureRequests() {
+    final repo = LlmRequestCaptureRepo(db);
+    LlmRequestCapture.sink = repo;
+    LlmCallEventCapture.sink = repo;
+    addTearDown(() {
+      LlmRequestCapture.sink = null;
+      LlmCallEventCapture.sink = null;
+    });
+    return () async {
+      var views = <PromptCaptureView>[];
+      for (var i = 0; i < 100; i++) {
+        views = await PromptCaptureViewService(repo).load('s1');
+        if (views.isNotEmpty &&
+            views.every((v) => v.transportOutcome != null)) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      return views;
+    };
+  }
+
   test(
     'denies methods the manifest does not grant, and unknown plugins',
     () async {
@@ -280,6 +312,51 @@ void main() {
       {'context': true},
     ]);
     expect((context['error'] as Map)['code'], 'permission_denied');
+  });
+
+  test('a plugin\'s text request shows up in the chat\'s requests', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    // The test binding answers every HTTP request with a 400.
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((req) async {
+      await req.drain<void>();
+      req.response.headers.contentType = ContentType.json;
+      req.response.write(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {'role': 'assistant', 'content': 'pong'},
+              'finish_reason': 'stop',
+            },
+          ],
+        }),
+      );
+      await req.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+    final captured = captureRequests();
+    await container
+        .read(apiConfigRepoProvider)
+        .put(
+          ApiConfig(
+            id: 'api',
+            name: 'Local',
+            apiKey: 'k',
+            endpoint: 'http://127.0.0.1:${server.port}/v1',
+            model: 'm',
+          ),
+        );
+
+    final out = await call(service(const ['generate']), 'generate', ['ping']);
+    expect(out['result'], 'pong');
+    final view = (await captured()).single;
+    expect(view.row.stage, 'plugin.generate');
+    expect(view.row.agentId, 'test.plugin');
+    expect(view.messages.single['content'], 'ping');
+    expect(view.transportOutcome?.kind, 'transport_succeeded');
+    expect(view.responseText, contains('pong'));
   });
 
   test('legacy "library" stands for every library and chat permission', () {
@@ -695,6 +772,93 @@ void main() {
       expect(seen.single, startsWith('POST /echo auth=Bearer k cookie=null'));
       expect(seen.single, contains('type=application/json'));
       expect(host.network, ['127.0.0.1:ok']);
+    });
+
+    test(
+      'each request shows in the chat\'s requests, secrets hidden',
+      () async {
+        final captured = captureRequests();
+        final s = service(const ['network'], localNetwork: true);
+        await fetch(s, '/echo?key=secret&q=1', {
+          'method': 'POST',
+          'headers': [
+            ['Content-Type', 'application/json'],
+            ['Authorization', 'Bearer k'],
+          ],
+          'body': base64Encode(
+            utf8.encode(
+              jsonEncode({
+                'model': 'gpt',
+                'messages': [
+                  {'role': 'user', 'content': 'hi'},
+                ],
+              }),
+            ),
+          ),
+        });
+        await fetch(s, '/missing');
+        final views = await captured();
+        expect(views, hasLength(2));
+        final missing = views.first;
+        expect(missing.row.agentId, 'test.plugin · GET 127.0.0.1/missing');
+        expect(missing.transportOutcome?.kind, 'transport_failed');
+        expect(missing.transportOutcome?.statusCode, 404);
+        final echo = views.last;
+        expect(echo.row.stage, 'plugin.net');
+        expect(echo.request['model'], 'gpt');
+        expect(echo.request['method'], 'POST');
+        expect(
+          echo.request['url'],
+          contains('key=%E2%80%A2%E2%80%A2%E2%80%A2'),
+        );
+        expect(echo.request['url'], contains('q=1'));
+        expect((echo.request['headers'] as Map)['authorization'], '•••');
+        expect(echo.messages.single['content'], 'hi');
+        expect(echo.responseText, contains('"got"'));
+      },
+    );
+
+    test('requests a frame reports show up too', () async {
+      final captured = captureRequests();
+      recordFramePluginRequest('test.plugin', 's1', {
+        'phase': 'start',
+        'id': 'f-1',
+        'via': 'fetch',
+        'method': 'post',
+        'url': 'https://api.example.com/v1/images',
+        'headers': [
+          ['x-api-key', 'secret'],
+        ],
+        'body': '{"prompt":"a cat"}',
+      });
+      recordFramePluginRequest('test.plugin', 's1', {
+        'phase': 'end',
+        'id': 'f-1',
+        'status': 500,
+        'body': 'oops',
+      });
+      final view = (await captured()).single;
+      expect(view.row.agentId, 'test.plugin · POST api.example.com/v1/images');
+      expect(view.request['via'], 'fetch');
+      expect((view.request['headers'] as Map)['x-api-key'], '•••');
+      expect(view.messages.single, {'role': 'prompt', 'content': 'a cat'});
+      expect(view.transportOutcome?.status, 'http_5xx');
+      expect(view.responseText, 'oops');
+    });
+
+    test('downloads the app makes for a plugin show up too', () async {
+      final captured = captureRequests();
+      final s = service(const ['network', 'files'], localNetwork: true);
+      final saved = await call(s, 'files.save', ['a.json', '$base/echo']);
+      expect(saved['ok'], true);
+      final missing = await call(s, 'files.save', ['b.json', '$base/none']);
+      expect(missing['ok'], false);
+      final views = await captured();
+      expect(views, hasLength(2));
+      expect(views.last.request['via'], 'download');
+      expect(views.last.responseText, '[text/plain, 10 bytes]');
+      expect(views.first.transportOutcome?.kind, 'transport_failed');
+      expect(views.first.responseError, contains('HTTP 404'));
     });
 
     test('redirects are checked and followed as a browser would', () async {

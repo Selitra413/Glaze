@@ -3202,6 +3202,7 @@
   "requests_response_none": "No response was recorded for this request",
   "requests_stage_embedding": "Embeddings",
   "requests_stage_image": "Image",
+  "requests_stage_plugin": "Plugin",
   "count_message_didnt_fit": {
     "one": "{} message didn't fit into context size",
     "other": "{} messages didn't fit into context size"
@@ -3564,7 +3565,7 @@
   "menu_plugins": "Plugins",
   "menu_plugins_hint": "Extensions for the chat",
   "plugins_title": "Plugins",
-  "plugins_intro": "Plugins add actions, panels and send hooks to every chat. Each plugin runs in an isolated frame inside the chat and can only use what its manifest asks for. Install plugins only from authors you trust.",
+  "plugins_intro": "Plugins add actions, panels and send hooks to every chat. Each plugin runs in an isolated frame inside the chat and can only use what its manifest asks for. Glaze limits what plugins can do but cannot guarantee complete security, so install plugins only from authors you trust.",
   "plugins_import": "Import plugin",
   "plugins_import_hint": "Tavo Extensions are supported.",
   "plugins_installed": "Installed",
