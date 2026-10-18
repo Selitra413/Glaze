@@ -119,10 +119,7 @@ void main() {
         SummaryShortenPromptPresets.resolve(null).prompt,
         summaryShortenPrompt,
       );
-      expect(
-        SummaryShortenPromptPresets.resolve('recompress').key,
-        'recompress',
-      );
+      expect(SummaryShortenPromptPresets.resolve('mine', [mine]).key, 'mine');
     });
 
     test('starts on the built-in defaults and survives a round trip', () async {
@@ -155,14 +152,14 @@ void main() {
 
       await c
           .read(summaryPromptSelectionProvider.notifier)
-          .save(const SummaryPromptSelection(shortenKey: 'recompress'));
+          .save(const SummaryPromptSelection(shortenKey: 'mine'));
       await c.read(summaryCustomShortenPromptsProvider.notifier).save([mine]);
 
       final reopened = ProviderContainer();
       addTearDown(reopened.dispose);
       expect(
         (await reopened.read(summaryPromptSelectionProvider.future)).shortenKey,
-        'recompress',
+        'mine',
       );
       expect(
         (await reopened.read(

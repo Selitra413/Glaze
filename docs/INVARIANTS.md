@@ -413,7 +413,8 @@ neither the summary nor any exclusion. Covered by
 
 The `summary` block's insertion mode decides where the text goes. `relative`
 and `depth` place the whole summary like any other block. `in_place`
-(`summaryInPlaceInsertion`, the default for new presets) puts it into the
+(`summaryInPlaceInsertion`, the default; the v144 migration moves a block still
+on the old default, depth 4, and leaves any other placement) puts it into the
 history where the covered messages were: `SummaryChain.promptView` cuts the
 live blocks into runs with no carried message between them
 (`SummaryPromptView.segments`), and each run goes as one message, formatted
