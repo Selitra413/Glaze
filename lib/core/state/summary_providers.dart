@@ -155,28 +155,38 @@ class SummaryCompactionSettingsNotifier
 }
 
 /// Which saved or built-in prompt summarizing runs on. Global, like the
-/// compaction settings. Keys are resolved by [SummaryPromptPresets] and
-/// [SummaryMergePromptPresets]; a key that names nothing falls back to the
-/// built-in default.
+/// compaction settings. Keys are resolved by [SummaryPromptPresets],
+/// [SummaryMergePromptPresets] and [SummaryShortenPromptPresets]; a key that
+/// names nothing falls back to the built-in default.
 ///
 /// A chat that still holds a prompt text of its own (from before presets were
 /// chosen by key) retells with that text until a preset is picked for it.
 class SummaryPromptSelection {
   final String retellKey;
   final String mergeKey;
+  final String shortenKey;
 
   const SummaryPromptSelection({
     this.retellKey = SummaryPromptPresets.fallbackKey,
     this.mergeKey = SummaryMergePromptPresets.fallbackKey,
+    this.shortenKey = SummaryShortenPromptPresets.fallbackKey,
   });
 
-  SummaryPromptSelection copyWith({String? retellKey, String? mergeKey}) =>
-      SummaryPromptSelection(
-        retellKey: retellKey ?? this.retellKey,
-        mergeKey: mergeKey ?? this.mergeKey,
-      );
+  SummaryPromptSelection copyWith({
+    String? retellKey,
+    String? mergeKey,
+    String? shortenKey,
+  }) => SummaryPromptSelection(
+    retellKey: retellKey ?? this.retellKey,
+    mergeKey: mergeKey ?? this.mergeKey,
+    shortenKey: shortenKey ?? this.shortenKey,
+  );
 
-  Map<String, dynamic> toJson() => {'retell': retellKey, 'merge': mergeKey};
+  Map<String, dynamic> toJson() => {
+    'retell': retellKey,
+    'merge': mergeKey,
+    'shorten': shortenKey,
+  };
 
   factory SummaryPromptSelection.fromJson(Map<String, dynamic> json) {
     const d = SummaryPromptSelection();
@@ -188,6 +198,7 @@ class SummaryPromptSelection {
     return SummaryPromptSelection(
       retellKey: read('retell', d.retellKey),
       mergeKey: read('merge', d.mergeKey),
+      shortenKey: read('shorten', d.shortenKey),
     );
   }
 
@@ -195,10 +206,11 @@ class SummaryPromptSelection {
   bool operator ==(Object other) =>
       other is SummaryPromptSelection &&
       other.retellKey == retellKey &&
-      other.mergeKey == mergeKey;
+      other.mergeKey == mergeKey &&
+      other.shortenKey == shortenKey;
 
   @override
-  int get hashCode => Object.hash(retellKey, mergeKey);
+  int get hashCode => Object.hash(retellKey, mergeKey, shortenKey);
 }
 
 final summaryPromptSelectionProvider =
@@ -260,6 +272,20 @@ final summaryCustomMergePromptsProvider =
 
 class SummaryCustomMergePromptsNotifier extends _PromptLibraryNotifier {
   static const prefsKey = 'summaryCustomMergePrompts';
+
+  @override
+  String get _prefsKey => prefsKey;
+}
+
+/// Shortening prompts the reader has written and saved.
+final summaryCustomShortenPromptsProvider =
+    AsyncNotifierProvider<
+      SummaryCustomShortenPromptsNotifier,
+      List<MemoryPromptPreset>
+    >(SummaryCustomShortenPromptsNotifier.new);
+
+class SummaryCustomShortenPromptsNotifier extends _PromptLibraryNotifier {
+  static const prefsKey = 'summaryCustomShortenPrompts';
 
   @override
   String get _prefsKey => prefsKey;

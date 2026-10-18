@@ -289,7 +289,7 @@
                     "id": "preset-injection",
                     "name": "Injection Point",
                     "alt": "Depth",
-                    "desc": "Controls where a block appears in the list of messages sent to the AI. 'Relative' keeps it in its natural order among the blocks. 'Depth' inserts it a fixed number of messages before the end — for example, depth 2 places it just before the last 2 chat messages, giving it strong immediate influence."
+                    "desc": "Controls where a block appears in the list of messages sent to the AI. 'Relative' keeps it in its natural order among the blocks. 'Depth' inserts it a fixed number of messages before the end — for example, depth 2 places it just before the last 2 chat messages, giving it strong immediate influence. The Summary block has a third mode, 'In place of the messages': each run of summary blocks goes into the history where the messages it retells were, oldest first."
                 },
                 {
                     "id": "prompt-post-processing",

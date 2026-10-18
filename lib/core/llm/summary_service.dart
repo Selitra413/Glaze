@@ -67,6 +67,10 @@ const summaryPreviousHeader =
 /// Heading the transcript goes under in the user message.
 const summaryTranscriptHeader = 'Transcript to summarize:';
 
+/// Placeholder replaced, in a merge prompt, with the level of the block the
+/// merge makes — one above its parts.
+const summaryLevelPlaceholder = '{{level}}';
+
 String summaryLengthHint(int targetTokens) =>
     'Keep it under about $targetTokens tokens.';
 
@@ -101,7 +105,8 @@ const summaryMergePrompt =
     '- Add nothing that the parts do not say. No preamble.';
 
 /// Instruction for a block that came out well past its target. Sent once; the
-/// shorter of the two texts is kept.
+/// shorter of the two texts is kept. The built-in default of
+/// `SummaryShortenPromptPresets`.
 const summaryShortenPrompt =
     'The summary you are given came out longer than it should. Shorten it '
     'without changing facts, their order, names or established terms, and '
@@ -221,7 +226,8 @@ class SummaryService {
   /// works here. Non-streaming (INV-S1).
   ///
   /// [earlierSummary] is the live blocks before this run, handed over as
-  /// context. [customPrompt] is the session's template.
+  /// context. [customPrompt] is the session's template; [shortenTemplate]
+  /// the chosen shortening prompt.
   Future<String> summarizeMessages({
     required String sessionId,
     required List<ChatMessage> source,
@@ -229,6 +235,7 @@ class SummaryService {
     required int targetTokens,
     String? earlierSummary,
     String? customPrompt,
+    String? shortenTemplate,
     MacroContext? macroContext,
     CancelToken? cancelToken,
     double? temperature,
@@ -239,6 +246,7 @@ class SummaryService {
       targetTokens: targetTokens,
       temperature: temperature,
       cancelToken: cancelToken,
+      shortenTemplate: shortenTemplate,
       messages: buildSummaryMessages(
         history: source,
         template: customPrompt,
@@ -251,13 +259,15 @@ class SummaryService {
 
   /// Merges [parts] — adjacent blocks of one level, in story order — into the
   /// text of one block a level up. Persists nothing. [template] is the chosen
-  /// merge prompt; [summaryMergePrompt] when absent.
+  /// merge prompt; [summaryMergePrompt] when absent. [shortenTemplate] is the
+  /// chosen shortening prompt.
   Future<String> mergeBlocks({
     required String sessionId,
     required List<SummaryBlock> parts,
     required ApiConfig apiConfig,
     required int targetTokens,
     String? template,
+    String? shortenTemplate,
     CancelToken? cancelToken,
     double? temperature,
   }) {
@@ -267,6 +277,7 @@ class SummaryService {
       targetTokens: targetTokens,
       temperature: temperature,
       cancelToken: cancelToken,
+      shortenTemplate: shortenTemplate,
       messages: buildMergeMessages(
         parts: parts,
         targetTokens: targetTokens,
@@ -283,6 +294,7 @@ class SummaryService {
     required ApiConfig apiConfig,
     required List<Map<String, String>> messages,
     required int targetTokens,
+    String? shortenTemplate,
     double? temperature,
     CancelToken? cancelToken,
   }) async {
@@ -300,7 +312,11 @@ class SummaryService {
       final shorter = await _call(
         sessionId: sessionId,
         apiConfig: apiConfig,
-        messages: buildShortenMessages(text: text, targetTokens: targetTokens),
+        messages: buildShortenMessages(
+          text: text,
+          targetTokens: targetTokens,
+          template: shortenTemplate,
+        ),
         targetTokens: targetTokens,
         temperature: temperature,
         cancelToken: cancelToken,
@@ -434,8 +450,8 @@ class SummaryService {
   }
 
   /// The merge request: [template] (or [summaryMergePrompt]) as the system
-  /// message, with `{{target_tokens}}` filled or the length hint appended, and
-  /// the parts in order as the user message.
+  /// message, with `{{level}}` filled, `{{target_tokens}}` filled or the length
+  /// hint appended, and the parts in order as the user message.
   List<Map<String, String>> buildMergeMessages({
     required List<SummaryBlock> parts,
     required int targetTokens,
@@ -444,6 +460,8 @@ class SummaryService {
     var instructions = (template == null || template.trim().isEmpty)
         ? summaryMergePrompt
         : template.trim();
+    final level = (parts.firstOrNull?.level ?? 1) + 1;
+    instructions = instructions.replaceAll(summaryLevelPlaceholder, '$level');
     instructions = instructions.contains(summaryTargetPlaceholder)
         ? instructions.replaceAll(summaryTargetPlaceholder, '$targetTokens')
         : '$instructions\n${summaryLengthHint(targetTokens)}';
@@ -460,16 +478,27 @@ class SummaryService {
     ];
   }
 
+  /// The shortening request: [template] (or [summaryShortenPrompt]) as the
+  /// system message, with `{{target_tokens}}` filled or the length hint
+  /// appended, and the oversized block as the user message.
   List<Map<String, String>> buildShortenMessages({
     required String text,
     required int targetTokens,
-  }) => [
-    {
-      'role': 'system',
-      'content': '$summaryShortenPrompt\n${summaryLengthHint(targetTokens)}',
-    },
-    {'role': 'user', 'content': text.trim()},
-  ];
+    String? template,
+  }) {
+    final instructions = (template == null || template.trim().isEmpty)
+        ? summaryShortenPrompt
+        : template.trim();
+    return [
+      {
+        'role': 'system',
+        'content': instructions.contains(summaryTargetPlaceholder)
+            ? instructions.replaceAll(summaryTargetPlaceholder, '$targetTokens')
+            : '$instructions\n${summaryLengthHint(targetTokens)}',
+      },
+      {'role': 'user', 'content': text.trim()},
+    ];
+  }
 
   Future<void> deleteSummary(String sessionId) async {
     await _repo.deleteBySessionId(sessionId);

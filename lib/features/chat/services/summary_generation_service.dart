@@ -83,6 +83,7 @@ class SummaryGenerationService {
       final service = _ref.read(summaryServiceProvider);
       final template = await _retellTemplate(session.id);
       final mergeTemplate = await _mergeTemplate();
+      final shortenTemplate = await _shortenTemplate();
       final inputCap = _summarizerInputCap(apiConfig);
 
       var messages = await _messages(session.id, session.messages);
@@ -116,6 +117,7 @@ class SummaryGenerationService {
               apiConfig: apiConfig,
               settings: settings,
               template: mergeTemplate,
+              shortenTemplate: shortenTemplate,
               temperature: slot.generationTemperature,
               cancelToken: cancelToken,
             );
@@ -159,6 +161,7 @@ class SummaryGenerationService {
           targetTokens: target,
           earlierSummary: SummaryChain.render(earlier),
           customPrompt: template,
+          shortenTemplate: shortenTemplate,
           macroContext: _macroContext(charId: charId, session: session),
           cancelToken: cancelToken,
           temperature: slot.generationTemperature,
@@ -223,6 +226,7 @@ class SummaryGenerationService {
         apiConfig: apiConfig,
         settings: settings,
         template: await _mergeTemplate(),
+        shortenTemplate: await _shortenTemplate(),
         temperature: slot.generationTemperature,
         cancelToken: cancelToken,
       );
@@ -291,6 +295,7 @@ class SummaryGenerationService {
     required ApiConfig apiConfig,
     required SummaryCompactionSettings settings,
     String? template,
+    String? shortenTemplate,
     double? temperature,
     CancelToken? cancelToken,
   }) async {
@@ -304,6 +309,7 @@ class SummaryGenerationService {
           apiConfig: apiConfig,
           targetTokens: target,
           template: template,
+          shortenTemplate: shortenTemplate,
           cancelToken: cancelToken,
           temperature: temperature,
         );
@@ -348,6 +354,15 @@ class SummaryGenerationService {
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomMergePromptsProvider.future);
     return SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt;
+  }
+
+  Future<String> _shortenTemplate() async {
+    final selection = await _ref.read(summaryPromptSelectionProvider.future);
+    final custom = await _ref.read(summaryCustomShortenPromptsProvider.future);
+    return SummaryShortenPromptPresets.resolve(
+      selection.shortenKey,
+      custom,
+    ).prompt;
   }
 
   /// Reads the blocks and messages fresh, applies [change] and saves. A null

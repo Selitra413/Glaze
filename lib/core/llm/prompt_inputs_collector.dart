@@ -144,6 +144,7 @@ class PromptInputsCollector {
       lorebookSettings: lorebookSettings,
       lorebookActivations: lorebookActivations,
       summaryContent: summaryContent,
+      summarySegments: summaryView?.segments ?? const [],
       guidanceText: guidanceText,
       authorsNote: session?.authorsNote,
       characterDepthPrompt: character.depthPrompt,

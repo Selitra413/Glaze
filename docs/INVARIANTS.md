@@ -364,7 +364,8 @@ the oldest summarizable messages outside the fresh tail (the rest of the
 window, and at least `SummaryChain.minTailMessages`) are retold as a level-1
 block. A run that would not make the block meaningfully shorter than its source
 is skipped. An answer more than `summaryShortenSlackPercent` of its target is
-sent back once to be shortened and the shorter text kept; a block that still
+sent back once to be shortened, with the chosen shortening prompt, and the
+shorter text kept; a block that still
 comes back no shorter than its source is rejected. Once the live
 blocks take more than `mergePercent` of the window, adjacent blocks of one
 level are merged a level up and the merged ones are archived.
@@ -381,9 +382,12 @@ The instructions go in the system message and the material — earlier summary
 and transcript, with speakers by name — in the user message; a template that
 places `{{history}}` is sent as one user message as written.
 
-Both prompts are chosen by key from a preset library, as in Memory Books
-(`SummaryPromptSelection`; `SummaryPromptPresets` and
-`SummaryMergePromptPresets` plus the reader's saved ones). Built-ins are
+The retelling, merging and shortening prompts are chosen by key from preset
+libraries, as in Memory Books (`SummaryPromptSelection`;
+`SummaryPromptPresets`, `SummaryMergePromptPresets` and
+`SummaryShortenPromptPresets` plus the reader's saved ones). A merge prompt gets
+`{{target_tokens}}` and `{{level}}`, the level of the block it makes; a
+shortening prompt gets `{{target_tokens}}`. Built-ins are
 read-only; a key that names nothing resolves to the built-in default. A chat
 that still holds a prompt text of its own retells with it until a preset is
 picked, which clears it. The transcript is
@@ -406,6 +410,19 @@ injection). The summary takes their place through the preset `summary` block or
 `{{summary}}`. A switched-off summary drops nothing. Historical requests carry
 neither the summary nor any exclusion. Covered by
 `test/summary_prompt_coverage_test.dart`.
+
+The `summary` block's insertion mode decides where the text goes. `relative`
+and `depth` place the whole summary like any other block. `in_place`
+(`summaryInPlaceInsertion`, the default for new presets) puts it into the
+history where the covered messages were: `SummaryChain.promptView` cuts the
+live blocks into runs with no carried message between them
+(`SummaryPromptView.segments`), and each run goes as one message, formatted
+like the block, right before the first message the history still carries after
+it — after the whole history when none follows. It is counted with the other
+blocks and placed last (`placeInPlaceSummary`), after the memory and recall
+blocks have settled in front of the history, so it always borders the messages
+that follow it. Trimming the history never drops it. Covered by
+`test/summary_in_place_test.dart`.
 
 ### INV-S7: Memory Book never carries the summary
 

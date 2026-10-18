@@ -97,7 +97,7 @@ Summarize this roleplay in two or three sentences, in the language the roleplay 
 /// rules as [SummaryPromptPresets]: chosen by key, built-ins read-only.
 ///
 /// `{{target_tokens}}` places the size target; without it the target is
-/// appended.
+/// appended. `{{level}}` places the level of the merged block.
 class SummaryMergePromptPresets {
   const SummaryMergePromptPresets._();
 
@@ -110,6 +110,11 @@ class SummaryMergePromptPresets {
       prompt: summaryMergePrompt,
     ),
     MemoryPromptPreset(key: 'tight', label: 'Tight', prompt: _tight),
+    MemoryPromptPreset(
+      key: 'compaction',
+      label: 'Compaction (by Astera)',
+      prompt: _compaction,
+    ),
   ];
 
   static List<MemoryPromptPreset> all([List<MemoryPromptPreset>? custom]) => [
@@ -130,6 +135,59 @@ You are given consecutive parts of the summary of one roleplay, oldest first. Me
 - Never present a thread that was resolved as open again.
 - Keep proper names and established terms exactly as written.
 - Add nothing that the parts do not say. No preamble.
+''';
+
+  /// Astera's compaction prompt. The original asks for JSON against a schema;
+  /// a block here is plain text, so it asks for the merged block itself.
+  static const _compaction = '''
+You are a hierarchical memory compaction engine for a long-running fictional conversation.
+Merge the supplied memory blocks into one canonical L{{level}} block while preserving their chronology and all important continuity.
+Target no more than {{target_tokens}} tokens. Resolve genuine updates in favor of newer information, but retain earlier facts that are still true. Preserve causal links, relationships, items, states, locations, commitments, unresolved threads, world facts, and exact names or terms.
+Do not invent details. Mark uncertainty instead of guessing. Write in the language the blocks are written in.
+Return only the merged block, with no preamble.
+''';
+}
+
+/// Ready-made prompts for shortening a block that came out well past its size
+/// target. Same rules as [SummaryPromptPresets]: chosen by key, built-ins
+/// read-only.
+///
+/// `{{target_tokens}}` places the size target; without it the target is
+/// appended.
+class SummaryShortenPromptPresets {
+  const SummaryShortenPromptPresets._();
+
+  static const fallbackKey = 'keep_facts';
+
+  static const builtIn = [
+    MemoryPromptPreset(
+      key: fallbackKey,
+      label: 'Keep facts (recommended)',
+      prompt: summaryShortenPrompt,
+    ),
+    MemoryPromptPreset(
+      key: 'recompress',
+      label: 'Recompress (by Astera)',
+      prompt: _recompress,
+    ),
+  ];
+
+  static List<MemoryPromptPreset> all([List<MemoryPromptPreset>? custom]) => [
+    ...builtIn,
+    ...?custom,
+  ];
+
+  static MemoryPromptPreset resolve(
+    String? key, [
+    List<MemoryPromptPreset>? custom,
+  ]) => _find(all(custom), key) ?? builtIn.first;
+
+  /// Astera's reduce prompt. The original keeps a JSON schema intact; a block
+  /// here is plain text, so it asks for the shortened block itself.
+  static const _recompress = '''
+You are reducing a memory block that exceeded its size target.
+Recompress it to no more than {{target_tokens}} tokens without changing facts, chronology, or names. Prefer removing repetition and low-value wording over removing continuity.
+Do not invent details. Keep the language it is written in. Return only the shortened block, with no preamble.
 ''';
 }
 

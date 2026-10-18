@@ -257,6 +257,7 @@ class PromptPayloadBuilder {
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 
     String? summaryContent;
+    List<SummarySegment> summarySegments = const [];
     Map<String, dynamic> memoryCoverage = {};
     List<TriggeredEntry> triggeredMemories = [];
     List<RuntimePromptBlock> runtimePromptBlocks = const [];
@@ -301,6 +302,7 @@ class PromptPayloadBuilder {
                 .getPromptView(session.id, session.messages)
           : null;
       summaryContent = summaryView?.content;
+      summarySegments = summaryView?.segments ?? const [];
       // Summarized messages are not sent: their block stands in for them.
       history = SummaryChain.withoutCovered(history, summaryView);
       throwIfAborted();
@@ -566,6 +568,7 @@ class PromptPayloadBuilder {
       lorebookActivations: lorebookActivations,
       vectorEntries: vectorEntries,
       summaryContent: summaryContent,
+      summarySegments: summarySegments,
       memoryContent: null,
       memoryMacroContent: null,
       memoryInjectionTarget: memoryInjectionTarget,
