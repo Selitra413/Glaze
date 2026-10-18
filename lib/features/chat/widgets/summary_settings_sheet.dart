@@ -72,6 +72,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   /// and the picker agree before anything is written.
   List<MemoryPromptPreset> _customPrompts = const [];
   List<MemoryPromptPreset> _customMergePrompts = const [];
+  List<MemoryPromptPreset> _customShortenPrompts = const [];
 
   SummaryPromptSelection _selection = const SummaryPromptSelection();
 
@@ -90,6 +91,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   /// hands back a new list only when something changed.
   List<MemoryPromptPreset> _loadedPrompts = const [];
   List<MemoryPromptPreset> _loadedMergePrompts = const [];
+  List<MemoryPromptPreset> _loadedShortenPrompts = const [];
 
   /// What was loaded, so Save writes only what actually changed. Writing the
   /// prompt unconditionally would be harmless; writing the compaction
@@ -118,6 +120,9 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     final customMergePrompts = await ref.read(
       summaryCustomMergePromptsProvider.future,
     );
+    final customShortenPrompts = await ref.read(
+      summaryCustomShortenPromptsProvider.future,
+    );
     final selection = await ref.read(summaryPromptSelectionProvider.future);
     // The preset list loads lazily; effectivePresetForChatProvider reads null
     // until it resolves, which would leave the injection section hidden.
@@ -139,6 +144,8 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       _customPrompts = customPrompts;
       _customMergePrompts = customMergePrompts;
       _loadedMergePrompts = customMergePrompts;
+      _customShortenPrompts = customShortenPrompts;
+      _loadedShortenPrompts = customShortenPrompts;
       _presetId = block == null ? null : preset?.id;
       _role = block?.role ?? _role;
       _insertionMode = block?.insertionMode ?? _insertionMode;
@@ -203,6 +210,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       await ref
           .read(summaryCustomMergePromptsProvider.notifier)
           .save(_customMergePrompts);
+    }
+    if (!identical(_customShortenPrompts, _loadedShortenPrompts)) {
+      await ref
+          .read(summaryCustomShortenPromptsProvider.notifier)
+          .save(_customShortenPrompts);
     }
     await _saveBlockSettings(current, loaded);
     if (!mounted) return;
@@ -378,6 +390,13 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         description: 'summary_prompt_merge_hint'.tr(),
                         onTap: _pickMerge,
                       ),
+                      MenuSelectorItem(
+                        key: const Key('summary_prompt_shorten'),
+                        label: 'summary_prompt_shorten_label'.tr(),
+                        currentValue: _shortenPreset().label,
+                        description: 'summary_prompt_shorten_hint'.tr(),
+                        onTap: _pickShorten,
+                      ),
                       MenuItem(
                         key: const Key('summary_view_current_prompts'),
                         icon: Icons.visibility_outlined,
@@ -409,8 +428,10 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                           onTap: _pickRole,
                         ),
                         MenuSelectorItem(
+                          key: const Key('summary_insertion'),
                           label: 'label_insertion'.tr(),
                           currentValue: _insertionLabel(_insertionMode),
+                          description: 'summary_insertion_hint'.tr(),
                           onTap: _pickInsertion,
                         ),
                         if (_insertionMode == 'depth')
@@ -441,6 +462,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     _customMergePrompts,
   );
 
+  MemoryPromptPreset _shortenPreset() => SummaryShortenPromptPresets.resolve(
+    _selection.shortenKey,
+    _customShortenPrompts,
+  );
+
   /// Picking a preset also lets go of the chat's own text, if it had one.
   void _pickRetell() {
     showPromptPresetPicker(
@@ -469,6 +495,19 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
   }
 
+  void _pickShorten() {
+    showPromptPresetPicker(
+      context,
+      title: 'summary_prompt_shorten_label'.tr(),
+      builtIn: SummaryShortenPromptPresets.builtIn,
+      custom: _customShortenPrompts,
+      activeKey: _shortenPreset().key,
+      onPick: (preset) => setState(
+        () => _selection = _selection.copyWith(shortenKey: preset.key),
+      ),
+    );
+  }
+
   Future<void> _viewPrompts() => GlazeBottomSheet.show<void>(
     context,
     title: 'summary_prompt_view_current'.tr(),
@@ -486,11 +525,16 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
           label: _mergePreset().label,
           prompt: _mergePreset().prompt,
         ),
+        (
+          title: 'summary_prompt_shorten_label'.tr(),
+          label: _shortenPreset().label,
+          prompt: _shortenPreset().prompt,
+        ),
       ],
     ),
   );
 
-  /// Two libraries, one entry point: which one to manage is asked first.
+  /// Three libraries, one entry point: which one to manage is asked first.
   void _managePrompts() {
     showGlazePickerSheet(
       context,
@@ -499,15 +543,24 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         GlazePickerItem(
           label: 'summary_prompt_retell_label'.tr(),
           isActive: false,
-          value: false,
+          value: 'retell',
         ),
         GlazePickerItem(
           label: 'summary_prompt_merge_label'.tr(),
           isActive: false,
-          value: true,
+          value: 'merge',
+        ),
+        GlazePickerItem(
+          label: 'summary_prompt_shorten_label'.tr(),
+          isActive: false,
+          value: 'shorten',
         ),
       ],
-      onSelect: (merge) => merge == true ? _manageMerge() : _manageRetell(),
+      onSelect: (library) => switch (library) {
+        'merge' => _manageMerge(),
+        'shorten' => _manageShorten(),
+        _ => _manageRetell(),
+      },
     );
   }
 
@@ -546,6 +599,23 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     });
   }
 
+  Future<void> _manageShorten() async {
+    final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
+      context,
+      title: 'memory_prompt_manage'.tr(),
+      child: CustomPromptManagerSheet(
+        customPrompts: _customShortenPrompts,
+        builtIn: SummaryShortenPromptPresets.builtIn,
+        title: 'summary_shorten_prompt_presets_title'.tr(),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _customShortenPrompts = result;
+      _selection = _selection.copyWith(shortenKey: _shortenPreset().key);
+    });
+  }
+
   /// Summarizing runs on the Memory slot, the same connection memory drafts
   /// use, so this leaves for where that slot is bound rather than binding a
   /// second one here.
@@ -560,8 +630,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     _ => 'System',
   };
 
-  static String _insertionLabel(String mode) =>
-      mode == 'depth' ? 'injection_depth'.tr() : 'injection_relative'.tr();
+  static String _insertionLabel(String mode) => switch (mode) {
+    summaryInPlaceInsertion => 'injection_in_place'.tr(),
+    'depth' => 'injection_depth'.tr(),
+    _ => 'injection_relative'.tr(),
+  };
 
   void _pickRole() {
     showGlazePickerSheet(
@@ -584,7 +657,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       context,
       title: 'label_insertion'.tr(),
       items: [
-        for (final mode in const ['relative', 'depth'])
+        for (final mode in const [summaryInPlaceInsertion, 'relative', 'depth'])
           GlazePickerItem(
             label: _insertionLabel(mode),
             isActive: _insertionMode == mode,

@@ -116,6 +116,8 @@ void main() {
     );
     expect(inputs.history.map((m) => m.id), ['m3']);
     expect(inputs.summaryContent, 'They met.');
+    expect(inputs.summarySegments.single.content, 'They met.');
+    expect(inputs.summarySegments.single.beforeMessageId, 'm3');
   });
 
   test('the isolate path drops the same messages', () async {
@@ -125,6 +127,7 @@ void main() {
     );
     expect(inputs.history.map((m) => m.id), ['m3']);
     expect(inputs.summaryContent, 'They met.');
+    expect(inputs.summarySegments.single.beforeMessageId, 'm3');
   });
 
   test('an edited source brings its messages back', () async {

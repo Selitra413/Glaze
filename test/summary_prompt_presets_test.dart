@@ -115,6 +115,11 @@ void main() {
         summaryMergePrompt,
       );
       expect(SummaryMergePromptPresets.resolve('mine', [mine]).key, 'mine');
+      expect(
+        SummaryShortenPromptPresets.resolve(null).prompt,
+        summaryShortenPrompt,
+      );
+      expect(SummaryShortenPromptPresets.resolve('mine', [mine]).key, 'mine');
     });
 
     test('starts on the built-in defaults and survives a round trip', () async {
@@ -137,6 +142,35 @@ void main() {
       );
       expect(restored.mergeKey, 'tight');
       expect(restored.retellKey, SummaryPromptPresets.fallbackKey);
+      expect(restored.shortenKey, SummaryShortenPromptPresets.fallbackKey);
+    });
+
+    test('a shortening preset survives a round trip', () async {
+      SharedPreferences.setMockInitialValues({});
+      final c = ProviderContainer();
+      addTearDown(c.dispose);
+
+      await c
+          .read(summaryPromptSelectionProvider.notifier)
+          .save(const SummaryPromptSelection(shortenKey: 'mine'));
+      await c.read(summaryCustomShortenPromptsProvider.notifier).save([mine]);
+
+      final reopened = ProviderContainer();
+      addTearDown(reopened.dispose);
+      expect(
+        (await reopened.read(summaryPromptSelectionProvider.future)).shortenKey,
+        'mine',
+      );
+      expect(
+        (await reopened.read(
+          summaryCustomShortenPromptsProvider.future,
+        )).single.key,
+        'mine',
+      );
+      expect(
+        await reopened.read(summaryCustomMergePromptsProvider.future),
+        isEmpty,
+      );
     });
 
     test('merge prompts are a library of their own', () async {

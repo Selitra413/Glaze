@@ -546,6 +546,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
     sessionVars: inputs.sessionVars,
     globalVars: inputs.globalVars,
     summaryContent: inputs.summaryContent,
+    summarySegments: inputs.summarySegments,
     guidanceText: inputs.guidanceText,
     lorebooks: inputs.lorebooks,
     lorebookSettings: inputs.lorebookSettings,

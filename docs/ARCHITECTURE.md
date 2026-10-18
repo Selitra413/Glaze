@@ -880,7 +880,7 @@ finishes.
 - `{{reasoningPrefix}}`, `{{reasoningSuffix}}` — inline reasoning tag config
 
 **Dynamic content:**
-- `{{summary}}` — live summary blocks; the messages they cover are left out of the history (INV-S6)
+- `{{summary}}` — live summary blocks; the messages they cover are left out of the history (INV-S6). The `summary` preset block can instead send them in place of those messages (`in_place` insertion)
 - `{{memory}}` — triggered memory book entries. Memory can enter the prompt three ways: a dedicated `memory` ("Memory Book") preset block (addable from the editor, resolves like the macro), the `{{memory}}` macro, or — with `injectionTarget='hard_block'` (default) — an auto-injected "Memory Book" system message. With `injectionTarget='macro'` and no `{{memory}}` macro or `memory` block present, memory is dropped and `memoryMacroMissing` is flagged. See INV-PS5.
 - `{{lorebooks}}` — triggered lorebook content
 - `{{guidance}}` — guided swipe instruction

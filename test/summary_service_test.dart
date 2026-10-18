@@ -11,6 +11,7 @@ import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
+import 'package:glaze_flutter/core/services/summary_prompt_presets.dart';
 
 /// Captures the aux call instead of hitting the network. Subclassing (rather
 /// than stubbing Dio) is what keeps the protocol assertion meaningful: the
@@ -352,6 +353,45 @@ void main() {
     expect(llm.user, contains('First part.'));
   });
 
+  test('built-in merge and shortening prompts leave no macro unfilled', () {
+    final service = SummaryService(repo);
+    final parts = [
+      block(['1'], 'First part.'),
+      block(['2'], 'Second part.'),
+    ];
+    for (final preset in SummaryMergePromptPresets.builtIn) {
+      final request = service.buildMergeMessages(
+        parts: parts,
+        targetTokens: 300,
+        template: preset.prompt,
+      );
+      expect(request.first['content'], isNot(contains('{{')));
+    }
+    for (final preset in SummaryShortenPromptPresets.builtIn) {
+      final request = service.buildShortenMessages(
+        text: 'Long.',
+        targetTokens: 300,
+        template: preset.prompt,
+      );
+      expect(request.first['content'], isNot(contains('{{')));
+    }
+  });
+
+  test('a merge prompt gets the level of the block it makes', () {
+    final service = SummaryService(repo);
+
+    final request = service.buildMergeMessages(
+      parts: [
+        block(['1'], 'First part.'),
+        block(['2'], 'Second part.'),
+      ],
+      targetTokens: 200,
+      template: 'Write one L{{level}} block of {{target_tokens}} tokens.',
+    );
+
+    expect(request.first['content'], 'Write one L2 block of 200 tokens.');
+  });
+
   test('a user message goes by the persona it was written as', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);
@@ -391,6 +431,27 @@ void main() {
     expect(result, 'Short.');
     expect(llm.calls, hasLength(2));
     expect(llm.system, startsWith(summaryShortenPrompt));
+    expect(llm.user, long);
+  });
+
+  test('a merge is shortened on the template it is given', () async {
+    final long = List.filled(400, 'word').join(' ');
+    final llm = _RecordingAuxLlmClient([long, 'Short.']);
+    final service = SummaryService(repo, llm: llm);
+
+    final result = await service.mergeBlocks(
+      sessionId: 'session',
+      parts: [
+        block(['1'], 'First part.'),
+        block(['2'], 'Second part.'),
+      ],
+      apiConfig: _api,
+      targetTokens: 150,
+      shortenTemplate: 'Cut it to {{target_tokens}} tokens.',
+    );
+
+    expect(result, 'Short.');
+    expect(llm.system, 'Cut it to 150 tokens.');
     expect(llm.user, long);
   });
 

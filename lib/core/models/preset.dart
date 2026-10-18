@@ -3,6 +3,11 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'preset.freezed.dart';
 part 'preset.g.dart';
 
+/// [PresetBlock.insertionMode] of the `summary` block alone: the summary goes
+/// into the history in place of the messages it covers, one message per
+/// unbroken run of blocks, in story order. See `docs/INVARIANTS.md` INV-S6.
+const summaryInPlaceInsertion = 'in_place';
+
 @freezed
 abstract class PresetBlock with _$PresetBlock {
   const factory PresetBlock({

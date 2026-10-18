@@ -97,7 +97,7 @@ Summarize this roleplay in two or three sentences, in the language the roleplay 
 /// rules as [SummaryPromptPresets]: chosen by key, built-ins read-only.
 ///
 /// `{{target_tokens}}` places the size target; without it the target is
-/// appended.
+/// appended. `{{level}}` places the level of the merged block.
 class SummaryMergePromptPresets {
   const SummaryMergePromptPresets._();
 
@@ -131,6 +131,36 @@ You are given consecutive parts of the summary of one roleplay, oldest first. Me
 - Keep proper names and established terms exactly as written.
 - Add nothing that the parts do not say. No preamble.
 ''';
+}
+
+/// Ready-made prompts for shortening a block that came out well past its size
+/// target. Same rules as [SummaryPromptPresets]: chosen by key, built-ins
+/// read-only.
+///
+/// `{{target_tokens}}` places the size target; without it the target is
+/// appended.
+class SummaryShortenPromptPresets {
+  const SummaryShortenPromptPresets._();
+
+  static const fallbackKey = 'keep_facts';
+
+  static const builtIn = [
+    MemoryPromptPreset(
+      key: fallbackKey,
+      label: 'Keep facts (recommended)',
+      prompt: summaryShortenPrompt,
+    ),
+  ];
+
+  static List<MemoryPromptPreset> all([List<MemoryPromptPreset>? custom]) => [
+    ...builtIn,
+    ...?custom,
+  ];
+
+  static MemoryPromptPreset resolve(
+    String? key, [
+    List<MemoryPromptPreset>? custom,
+  ]) => _find(all(custom), key) ?? builtIn.first;
 }
 
 MemoryPromptPreset? _find(List<MemoryPromptPreset> presets, String? key) =>

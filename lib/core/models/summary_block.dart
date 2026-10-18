@@ -129,12 +129,52 @@ class SummaryPromptView {
   final String content;
   final Set<String> coveredMessageIds;
 
+  /// [content] cut where the history runs between blocks, for a summary sent
+  /// in place of its messages. Story order.
+  final List<SummarySegment> segments;
+
   const SummaryPromptView({
     required this.content,
     this.coveredMessageIds = const {},
+    this.segments = const [],
   });
 
   static const empty = SummaryPromptView(content: '');
+}
+
+/// One unbroken run of live blocks: no message the prompt carries sits
+/// between them. Sent in place of the messages it covers — right before
+/// [beforeMessageId], the first message after the run the history still
+/// carries, or after the whole history when none follows.
+class SummarySegment {
+  final String content;
+  final String? beforeMessageId;
+
+  const SummarySegment({required this.content, this.beforeMessageId});
+
+  Map<String, dynamic> toJson() => {
+    'content': content,
+    'beforeMessageId': beforeMessageId,
+  };
+
+  static SummarySegment? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final content = raw['content'];
+    if (content is! String) return null;
+    final before = raw['beforeMessageId'];
+    return SummarySegment(
+      content: content,
+      beforeMessageId: before is String ? before : null,
+    );
+  }
+
+  static List<Map<String, dynamic>> encodeList(List<SummarySegment> list) => [
+    for (final segment in list) segment.toJson(),
+  ];
+
+  static List<SummarySegment> decodeList(Object? raw) => raw is List
+      ? [for (final item in raw) ?SummarySegment.fromJson(item)]
+      : const [];
 }
 
 /// A run of messages picked for a new level-1 block.
@@ -245,10 +285,74 @@ class SummaryChain {
     List<ChatMessage> messages,
   ) {
     final used = live(blocks, messages);
+    final covered = {for (final block in used) ...block.messageIds};
     return SummaryPromptView(
       content: render(used),
-      coveredMessageIds: {for (final block in used) ...block.messageIds},
+      coveredMessageIds: covered,
+      segments: _segments(used, messages, covered),
     );
+  }
+
+  /// Cuts [used] — live blocks in story order — where a message the prompt
+  /// carries sits between two of them. Notes cover no messages and open the
+  /// first run.
+  static List<SummarySegment> _segments(
+    List<SummaryBlock> used,
+    List<ChatMessage> messages,
+    Set<String> covered,
+  ) {
+    final position = {
+      for (var i = 0; i < messages.length; i++) messages[i].id: i,
+    };
+    int end(SummaryBlock block) {
+      var last = -1;
+      for (final id in block.messageIds) {
+        final at = position[id];
+        if (at != null && at > last) last = at;
+      }
+      return last;
+    }
+
+    // The first message after [from] that the history still carries: what
+    // the history assembler sends, less what a block stands in for.
+    int? next(int from) {
+      for (var i = from + 1; i < messages.length; i++) {
+        final message = messages[i];
+        if (message.isHidden || message.isTyping) continue;
+        if (!covered.contains(message.id)) return i;
+      }
+      return null;
+    }
+
+    final segments = <SummarySegment>[];
+    var run = <SummaryBlock>[];
+    var runEnd = -1;
+    void flush() {
+      final text = render(run);
+      if (text.isNotEmpty) {
+        final at = next(runEnd);
+        segments.add(
+          SummarySegment(
+            content: text,
+            beforeMessageId: at == null ? null : messages[at].id,
+          ),
+        );
+      }
+      run = [];
+    }
+
+    for (final block in used) {
+      final blockEnd = end(block);
+      if (run.isNotEmpty && blockEnd >= 0) {
+        final gap = next(runEnd);
+        final start = position[block.messageIds.first] ?? blockEnd;
+        if (gap != null && gap < start) flush();
+      }
+      run.add(block);
+      if (blockEnd > runEnd) runEnd = blockEnd;
+    }
+    if (run.isNotEmpty) flush();
+    return segments;
   }
 
   /// [history] without the messages [view] stands in for. Matched by id,

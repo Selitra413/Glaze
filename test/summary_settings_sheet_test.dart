@@ -206,15 +206,17 @@ void main() {
     expect(find.text('summary_connection_hint'.tr()), findsOneWidget);
     await _scrollTo(tester, find.byKey(const Key('summary_manage_prompts')));
     // Prompts are picked from presets, as in Memory Books: one for retelling,
-    // one for merging, a view of both and the saved-prompt manager. No text
-    // field to edit in place.
+    // one for merging, one for shortening, a view of them and the saved-prompt
+    // manager. No text field to edit in place.
     expect(find.text('summary_prompt_retell_label'.tr()), findsOneWidget);
     expect(find.text('summary_prompt_merge_label'.tr()), findsOneWidget);
+    expect(find.text('summary_prompt_shorten_label'.tr()), findsOneWidget);
     expect(find.text('summary_prompt_view_current'.tr()), findsOneWidget);
     expect(find.text('memory_prompt_manage'.tr()), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Recap (recommended)'), findsOneWidget);
     expect(find.text('Keep continuity (recommended)'), findsOneWidget);
+    expect(find.text('Keep facts (recommended)'), findsOneWidget);
   });
 
   testWidgets('the switch in the settings is the injection master switch', (
