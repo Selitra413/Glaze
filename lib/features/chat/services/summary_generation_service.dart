@@ -228,10 +228,13 @@ class SummaryGenerationService {
   }
 
   /// Writes an active block again over the same sources, on the prompts
-  /// chosen now. A level-1 block retells its messages as they read today,
-  /// which also brings a stale one back; a merge is merged again from its
-  /// parts. A merge whose messages changed is refused (`stale_merge`): its
-  /// parts are as out of date as it is, and deleting it gives them back.
+  /// chosen now, and leaves the result on it as a [SummaryDraft] for the
+  /// reader to approve ([approveDraft]) — the block keeps its text until then.
+  /// A level-1 block retells its messages as they read today, so approving
+  /// brings a stale one back; a merge is merged again from its parts. A merge
+  /// whose messages changed is refused (`stale_merge`): its parts are as out
+  /// of date as it is, and deleting it gives them back. A stopped run
+  /// ([cancelToken]) writes nothing.
   Future<void> regenerateBlock({
     required String charId,
     required ChatSession session,
@@ -315,27 +318,68 @@ class SummaryGenerationService {
       if (tokens >= sourceTokens) {
         throw const SummaryChainException('not_shorter');
       }
-      final written = SummaryBlock(
-        id: block.id,
-        level: block.level,
+      final draft = SummaryDraft(
         content: text,
         messageIds: ids,
         sourceHash: SummaryChain.fingerprint(ids, byId),
-        childIds: block.childIds,
         tokens: tokens,
         sourceTokens: sourceTokens,
-        createdAt: block.createdAt,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
       );
+      bool stopped() => cancelToken?.isCancelled ?? false;
       final committed = await _commit(session.id, messages, (current, now) {
-        // Edited while the summarizer was writing: the new text describes
-        // messages that no longer read that way.
-        if (SummaryChain.isStale(written, SummaryChain.index(now))) {
+        // Stopped, or edited while the summarizer was writing: the draft
+        // describes messages that no longer read that way.
+        if (stopped() ||
+            SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
           return null;
         }
-        return SummaryChain.commitRegenerated(current, written);
+        return SummaryChain.putDraft(current, block.id, draft);
       });
-      if (!committed) throw const SummaryChainException('changed');
+      if (!committed && !stopped()) {
+        throw const SummaryChainException('changed');
+      }
     });
+  }
+
+  /// Puts the draft [regenerateBlock] left on [blockId] in place of the
+  /// block's text. Throws `changed` when its messages changed after it was
+  /// written.
+  Future<void> approveDraft({
+    required ChatSession session,
+    required String blockId,
+  }) async {
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, messages) =>
+          SummaryChain.approveDraft(blocks, messages, blockId),
+    );
+  }
+
+  Future<void> editDraft({
+    required ChatSession session,
+    required String blockId,
+    required String content,
+  }) async {
+    if (content.trim().isEmpty) return;
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.editDraft(blocks, blockId, content),
+    );
+  }
+
+  /// Drops the draft of [blockId]; the block keeps the text it has.
+  Future<void> discardDraft({
+    required ChatSession session,
+    required String blockId,
+  }) async {
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.putDraft(blocks, blockId, null),
+    );
   }
 
   Future<void> editBlock({
@@ -470,8 +514,9 @@ class SummaryGenerationService {
     ).prompt;
   }
 
-  /// Reads the blocks and messages fresh, applies [change] and saves. A null
-  /// from [change] skips the write. Returns whether anything was written.
+  /// Reads the messages fresh, then applies [change] to the blocks as stored
+  /// and saves them in one transaction. A null from [change] skips the write.
+  /// Returns whether anything was written.
   Future<bool> _commit(
     String sessionId,
     List<ChatMessage> fallbackMessages,
@@ -481,17 +526,16 @@ class SummaryGenerationService {
     )
     change,
   ) async {
-    final service = _ref.read(summaryServiceProvider);
     final messages = await _messages(sessionId, fallbackMessages);
-    final next = change(await service.getBlocks(sessionId), messages);
-    if (next == null) return false;
-    await service.saveBlocks(
-      sessionId: sessionId,
-      blocks: next,
-      messages: messages,
-    );
-    _notifyChanged();
-    return true;
+    final written = await _ref
+        .read(summaryServiceProvider)
+        .mutateBlocks(
+          sessionId: sessionId,
+          messages: messages,
+          change: (blocks) => change(blocks, messages),
+        );
+    if (written) _notifyChanged();
+    return written;
   }
 
   /// Drops stale blocks before anything is planned on top of them.
@@ -499,17 +543,18 @@ class SummaryGenerationService {
     String sessionId,
     List<ChatMessage> messages,
   ) async {
-    final service = _ref.read(summaryServiceProvider);
-    final blocks = await service.getBlocks(sessionId);
-    final cleaned = SummaryChain.withoutStale(blocks, messages);
-    if (!identical(cleaned, blocks)) {
-      await service.saveBlocks(
-        sessionId: sessionId,
-        blocks: cleaned,
-        messages: messages,
-      );
-      _notifyChanged();
-    }
+    var cleaned = const <SummaryBlock>[];
+    final written = await _ref
+        .read(summaryServiceProvider)
+        .mutateBlocks(
+          sessionId: sessionId,
+          messages: messages,
+          change: (blocks) {
+            cleaned = SummaryChain.withoutStale(blocks, messages);
+            return identical(cleaned, blocks) ? null : cleaned;
+          },
+        );
+    if (written) _notifyChanged();
     return cleaned;
   }
 
