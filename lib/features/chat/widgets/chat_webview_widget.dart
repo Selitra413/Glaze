@@ -545,7 +545,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         ),
         onReady: () {
           if (!mounted || !identical(_bridge, bridge)) return;
-          _ready = true;
+          // A rebuild, so the surface lowers its cover: the page is painted
+          // and the reader may see it now.
+          setState(() => _ready = true);
           // The page is alive and painted: whatever it took to get here is no
           // longer evidence of a rebuild storm.
           _recovery.noteHealthy();
@@ -1443,6 +1445,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       isActive: (epoch) =>
           mounted && _lifecycleActive && epoch == _lifecycleEpoch,
       sessionSwitching: _sessionSwitching,
+      ready: _ready,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,
       bgBlur: widget.bgBlur,

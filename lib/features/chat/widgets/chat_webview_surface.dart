@@ -44,6 +44,7 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
     required this.lifecycleEpoch,
     required this.isActive,
     required this.sessionSwitching,
+    required this.ready,
     required this.refreshPanel,
     required this.bgImageBytes,
     required this.bgBlur,
@@ -73,6 +74,14 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
   final int lifecycleEpoch;
   final bool Function(int epoch) isActive;
   final bool sessionSwitching;
+
+  /// The page has painted this chat. Until then the surface is covered the
+  /// way it is during a session switch: a chat used to open onto the bare
+  /// native view — blank while it was created, then the page's own spinner
+  /// going out before the messages had laid out, then the jump to the
+  /// bottom — which read as the app lagging. One cover from the first frame
+  /// to the first paint, faded out, reads as the chat loading.
+  final bool ready;
   final Future<void> Function(String sessionId, String messageId) refreshPanel;
   final Uint8List? bgImageBytes;
   final double bgBlur;
@@ -285,12 +294,13 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
             ?.evalJs('window.bridge?.setAllowMessageScripts($newValue)');
       }
     });
+    final covered = widget.sessionSwitching || !widget.ready;
     return Stack(
       children: [
         Positioned.fill(child: _background(context)),
         Positioned.fill(
           child: IgnorePointer(
-            ignoring: widget.sessionSwitching,
+            ignoring: covered,
             // Windows touchpad panning is forwarded by this wrapper. Keeping it
             // below IgnorePointer freezes native interaction during a switch.
             child: _mountNativeView
@@ -336,9 +346,17 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                 : const SizedBox.expand(),
           ),
         ),
-        if (widget.sessionSwitching)
-          Positioned.fill(child: IgnorePointer(child: _background(context))),
-        if (widget.sessionSwitching) const Center(child: GlazeSpinner()),
+        Positioned.fill(
+          child: ChatSurfaceCover(
+            visible: covered,
+            child: Stack(
+              children: [
+                Positioned.fill(child: _background(context)),
+                const Center(child: GlazeSpinner()),
+              ],
+            ),
+          ),
+        ),
         if (widget.bottomInset > 0)
           Positioned.fill(
             child: IgnorePointer(
@@ -357,6 +375,59 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The cover over the surface: up at once, down with a fade.
+///
+/// Raised synchronously — the first frame of a session switch, or of a chat
+/// that has not painted yet, must already hide the native view. Lowered over
+/// [fade], and only taken out of the tree once the fade has ended: the page is
+/// underneath by then, so what the reader sees is the chat settling in rather
+/// than appearing. Never takes a touch, so the view below gets its own
+/// `IgnorePointer` for the time the cover is meant to block it.
+class ChatSurfaceCover extends StatefulWidget {
+  const ChatSurfaceCover({
+    super.key,
+    required this.visible,
+    required this.child,
+  });
+
+  final bool visible;
+  final Widget child;
+
+  static const fade = Duration(milliseconds: 280);
+
+  @override
+  State<ChatSurfaceCover> createState() => _ChatSurfaceCoverState();
+}
+
+class _ChatSurfaceCoverState extends State<ChatSurfaceCover> {
+  /// Whether the cover is in the tree: from the moment it is asked for until
+  /// its fade-out has ended.
+  late bool _present = widget.visible;
+
+  @override
+  void didUpdateWidget(ChatSurfaceCover old) {
+    super.didUpdateWidget(old);
+    if (widget.visible && !_present) _present = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_present) return const SizedBox.shrink();
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: widget.visible ? 1 : 0,
+        // Up at once; the fade is for the way down.
+        duration: widget.visible ? Duration.zero : ChatSurfaceCover.fade,
+        curve: Curves.easeOut,
+        onEnd: () {
+          if (!widget.visible && mounted) setState(() => _present = false);
+        },
+        child: widget.child,
+      ),
     );
   }
 }
