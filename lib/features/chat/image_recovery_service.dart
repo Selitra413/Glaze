@@ -83,35 +83,56 @@ class ImageRecoveryService {
         currentMsg,
         currentMsg.content,
       );
-      if (jsonEncode(alignedMsg.toJson()) != jsonEncode(currentMsg.toJson())) {
+      // Structural equality, not a JSON round trip. This runs over every
+      // message each time a chat is opened, and encoding each one twice to
+      // compare the strings took a second of the UI isolate on a long chat —
+      // most of it the swipe metadata, which is the bulk of a stored message.
+      if (alignedMsg != currentMsg) {
         currentMsg = alignedMsg;
         changed = true;
       }
 
-      final cleanedAgentSwipes = currentMsg.agentSwipes
-          .map(
-            (swipe) =>
-                swipe.copyWith(content: cleanStuckImgGenTags(swipe.content)),
-          )
-          .toList();
-      final cleanedMeta = currentMsg.swipesMeta.map((entry) {
-        final meta = Map<String, dynamic>.from(entry);
-        final stored = meta['agentSwipes'];
-        if (stored is List) {
-          meta['agentSwipes'] = stored.map((value) {
-            if (value is! Map) return value;
-            final swipe = Map<String, dynamic>.from(value);
-            final content = swipe['content'];
-            if (content is String) {
-              swipe['content'] = cleanStuckImgGenTags(content);
-            }
-            return swipe;
-          }).toList();
+      // Cleaning returns the very string it was given when there is nothing
+      // to clean, so a message with nothing stuck costs a scan and no copies.
+      var agentSwipesChanged = false;
+      final cleanedAgentSwipes = <AgentSwipe>[];
+      for (final swipe in currentMsg.agentSwipes) {
+        final cleaned = cleanStuckImgGenTags(swipe.content);
+        if (identical(cleaned, swipe.content)) {
+          cleanedAgentSwipes.add(swipe);
+        } else {
+          cleanedAgentSwipes.add(swipe.copyWith(content: cleaned));
+          agentSwipesChanged = true;
         }
-        return meta;
-      }).toList();
-      if (!_agentSwipeListsEqual(cleanedAgentSwipes, currentMsg.agentSwipes) ||
-          !_metaListsEqual(cleanedMeta, currentMsg.swipesMeta)) {
+      }
+      var metaChanged = false;
+      final cleanedMeta = <Map<String, dynamic>>[];
+      for (final entry in currentMsg.swipesMeta) {
+        final stored = entry['agentSwipes'];
+        if (stored is! List) {
+          cleanedMeta.add(entry);
+          continue;
+        }
+        var entryChanged = false;
+        final swipes = stored.map((value) {
+          if (value is! Map) return value;
+          final content = value['content'];
+          if (content is! String) return value;
+          final cleaned = cleanStuckImgGenTags(content);
+          if (identical(cleaned, content)) return value;
+          entryChanged = true;
+          return Map<String, dynamic>.from(value)..['content'] = cleaned;
+        }).toList();
+        if (!entryChanged) {
+          cleanedMeta.add(entry);
+          continue;
+        }
+        cleanedMeta.add(
+          Map<String, dynamic>.from(entry)..['agentSwipes'] = swipes,
+        );
+        metaChanged = true;
+      }
+      if (agentSwipesChanged || metaChanged) {
         currentMsg = currentMsg.copyWith(
           agentSwipes: cleanedAgentSwipes,
           swipesMeta: cleanedMeta,
@@ -124,15 +145,6 @@ class ImageRecoveryService {
     if (!changed) return session;
     return session.copyWith(messages: messages);
   }
-
-  static bool _agentSwipeListsEqual(List<AgentSwipe> a, List<AgentSwipe> b) =>
-      jsonEncode(a.map((swipe) => swipe.toJson()).toList()) ==
-      jsonEncode(b.map((swipe) => swipe.toJson()).toList());
-
-  static bool _metaListsEqual(
-    List<Map<String, dynamic>> a,
-    List<Map<String, dynamic>> b,
-  ) => jsonEncode(a) == jsonEncode(b);
 
   static String cleanStuckImgGenTags(String text) {
     if (!ImgGenPatterns.imgGenRegex.hasMatch(text) &&
@@ -326,10 +338,7 @@ class ImageRecoveryService {
                 !ImageTagMarkup.hasImageGenTags(content)) {
               return null;
             }
-            return ImageGenProcessor.resetImageContentInPlace(
-              message,
-              content,
-            );
+            return ImageGenProcessor.resetImageContentInPlace(message, content);
           },
         );
     if (resetSession == null) return;
@@ -450,10 +459,7 @@ class ImageRecoveryService {
             if (message.role != 'assistant') return null;
             final content = reset(message.content);
             if (content == message.content) return null;
-            return ImageGenProcessor.resetImageContentInPlace(
-              message,
-              content,
-            );
+            return ImageGenProcessor.resetImageContentInPlace(message, content);
           },
         );
     if (resetSession == null) return;

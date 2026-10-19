@@ -120,6 +120,38 @@ class AgentSwipe {
     studioOutputs: studioOutputs ?? this.studioOutputs,
     parentSwipeId: parentSwipeId ?? this.parentSwipeId,
   );
+
+  /// By value, as the freezed models around it: a message rebuilt with the
+  /// same swipes is the same message, which is what lets the open-time
+  /// fix-up tell a repaired message from an untouched one without encoding
+  /// both to JSON.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AgentSwipe &&
+          other.content == content &&
+          other.kind == kind &&
+          other.reasoning == reasoning &&
+          other.genTime == genTime &&
+          other.tokens == tokens &&
+          other.time == time &&
+          other.parentSwipeId == parentSwipeId &&
+          const DeepCollectionEquality().equals(
+            other.studioOutputs,
+            studioOutputs,
+          );
+
+  @override
+  int get hashCode => Object.hash(
+    content,
+    kind,
+    reasoning,
+    genTime,
+    tokens,
+    time,
+    parentSwipeId,
+    const DeepCollectionEquality().hash(studioOutputs),
+  );
 }
 
 @freezed
