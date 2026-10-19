@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 /// Compile-time diagnostic switches for on-device performance profiling.
@@ -146,6 +148,17 @@ abstract final class PerfDebug {
   /// the frames they stalled.
   static void installFrameLoggerIfEnabled() {
     if (!logSlowFrames) return;
+    // The frame log says a frame came late; this says when the isolate stood
+    // still, whether a frame was due or not — native work on the platform
+    // thread (which this isolate runs on, on desktop) shows up here as a gap
+    // between ticks, with the time it ended.
+    var lastTick = DateTime.now();
+    Timer.periodic(const Duration(milliseconds: 8), (_) {
+      final now = DateTime.now();
+      final gap = now.difference(lastTick).inMilliseconds;
+      lastTick = now;
+      if (gap >= 80) debugPrint('[stall] the isolate stood still for $gap ms');
+    });
     WidgetsBinding.instance.addTimingsCallback((timings) {
       for (final t in timings) {
         final buildMs = t.buildDuration.inMicroseconds / 1000.0;

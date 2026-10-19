@@ -128,7 +128,9 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     super.initState();
     if (Platform.isWindows) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _mountNativeView = true);
+        if (!mounted) return;
+        debugPrint('[perf] chat view: native view mounting');
+        setState(() => _mountNativeView = true);
       });
     }
   }
@@ -184,6 +186,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
   Future<void> _onWebViewCreated(InAppWebViewController controller) async {
     final epoch = widget.lifecycleEpoch;
     if (!_callbackIsActive(epoch)) return;
+    debugPrint('[perf] chat view: native view created');
     PerfDebug.chatWebViewSurfaceCreated();
     final jsBridgeService = await widget.bridgeHost.buildJsBridgeService();
     if (!_callbackIsActive(epoch) || jsBridgeService == null) return;
@@ -271,6 +274,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
   Future<void> _onLoadStop(InAppWebViewController controller, Uri? url) async {
     final epoch = widget.lifecycleEpoch;
     if (!_callbackIsActive(epoch)) return;
+    debugPrint('[perf] chat view: page loaded');
     PerfDebug.chatWebViewLoadStopped();
     await ref
         .read(chatBridgeRegistryProvider(widget.charId))
