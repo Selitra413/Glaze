@@ -552,7 +552,9 @@ class ChatSessionService {
   /// new one.
   Future<int> _nextSessionIndex(String charId) async {
     final repo = _ref.read(chatRepoProvider);
-    final sessions = await repo.getByCharacterId(charId);
+    // Indexes only: the full sessions would decode every message the
+    // character has, just to read `.sessionIndex` off them.
+    final sessions = await repo.getMetadataByCharacterId(charId);
     // No sessions at all → start over at 0, the index `createInitialSession`
     // uses. `currentSessionIndex` defaults to 0 and so cannot tell "never had
     // a chat" from "was on chat #1"; it is only a usable high-water mark while
