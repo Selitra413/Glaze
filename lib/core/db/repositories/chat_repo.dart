@@ -157,6 +157,18 @@ FROM chat_sessions''';
     return true;
   }
 
+  /// How many characters of JSON [sessionId]'s messages take, without reading
+  /// them; null for a session that does not exist. A cheap way to tell a
+  /// chat worth loading ahead of time from one that is not.
+  Future<int?> messagesJsonLength(String sessionId) async {
+    final length = _db.chatSessions.messagesJson.length;
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([length])
+      ..where(_db.chatSessions.sessionId.equals(sessionId));
+    final row = await query.getSingleOrNull();
+    return row?.read(length);
+  }
+
   /// The character [sessionId] belongs to, without reading its messages.
   Future<String?> characterIdOf(String sessionId) async {
     final query = _db.selectOnly(_db.chatSessions)

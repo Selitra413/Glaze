@@ -97,8 +97,19 @@ class ChatSessionService {
     final currentIdx = character?.currentSessionIndex ?? 0;
 
     final directId = '${charId}_$currentIdx';
+    // The cache first, and the cache filled after: opening a chat from the
+    // list used to decode its current session here, then decode it again in
+    // `switchToSession` a moment later — tens of megabytes, twice.
+    final cached = _cache[directId];
+    if (cached != null && cached.characterId == charId) {
+      _touchCacheKey(directId);
+      return cached;
+    }
     var session = await repo.getById(directId);
-    if (session?.characterId == charId) return session;
+    if (session?.characterId == charId) {
+      updateCache(session!);
+      return session;
+    }
 
     final sessions = await repo.getByCharacterId(charId);
     if (sessions.isEmpty) return null;
@@ -152,6 +163,11 @@ class ChatSessionService {
     return session;
   }
 
+  /// A neighbour this long (in characters of stored JSON) is not loaded ahead
+  /// of time: decoding it costs what it saves, and its messages would sit in
+  /// the cache — a long roleplay's branches are tens of megabytes each.
+  static const _prefetchMaxChars = 2 * 1024 * 1024;
+
   void _prefetchAdjacent(String charId, int currentIdx) {
     if (!_ref.mounted) return;
     final repo = _ref.read(chatRepoProvider);
@@ -169,17 +185,19 @@ class ChatSessionService {
           _touchCacheKey(key);
         }
 
+        Future<void> prefetch(String key) async {
+          final length = await repo.messagesJsonLength(key);
+          if (length == null || length > _prefetchMaxChars) return;
+          publish(key, await repo.getById(key));
+        }
+
         if (currentIdx > 0) {
           final prevKey = '${charId}_${currentIdx - 1}';
-          if (!_cache.containsKey(prevKey)) {
-            futures.add(repo.getById(prevKey).then((s) => publish(prevKey, s)));
-          }
+          if (!_cache.containsKey(prevKey)) futures.add(prefetch(prevKey));
         }
 
         final nextKey = '${charId}_${currentIdx + 1}';
-        if (!_cache.containsKey(nextKey)) {
-          futures.add(repo.getById(nextKey).then((s) => publish(nextKey, s)));
-        }
+        if (!_cache.containsKey(nextKey)) futures.add(prefetch(nextKey));
 
         if (futures.isNotEmpty) await Future.wait(futures);
       } catch (e) {

@@ -10,7 +10,7 @@ void main() {
     final order = <String>[];
     final handler = DesktopCloseHandler(
       markClosed: () => order.add('marked'),
-      destroy: () async => order.add('destroyed'),
+      closeWindow: () async => order.add('destroyed'),
     );
 
     handler.onWindowClose();
@@ -23,7 +23,7 @@ void main() {
     var destroyed = false;
     final handler = DesktopCloseHandler(
       markClosed: () => throw StateError('disk full'),
-      destroy: () async => destroyed = true,
+      closeWindow: () async => destroyed = true,
     );
 
     expect(handler.onWindowClose, throwsStateError);
@@ -37,7 +37,7 @@ void main() {
     var destroyed = 0;
     final handler = DesktopCloseHandler(
       markClosed: () => marked++,
-      destroy: () async => destroyed++,
+      closeWindow: () async => destroyed++,
     );
 
     handler.onWindowClose();

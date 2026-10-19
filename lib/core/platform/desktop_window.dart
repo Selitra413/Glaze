@@ -58,11 +58,20 @@ Future<void> initDesktopWindow() async {
   // comes to [DesktopCloseHandler], which marks the run as closed first.
   await windowManager.setPreventClose(true);
   windowManager.addListener(
-    DesktopCloseHandler(
-      markClosed: AppLog.markClosed,
-      destroy: windowManager.destroy,
-    ),
+    DesktopCloseHandler(markClosed: AppLog.markClosed, closeWindow: _letClose),
   );
+}
+
+/// Lets the close go through the way it did before it was intercepted: the
+/// intercept is lifted and the close requested again, so the system destroys
+/// the window at once and the process winds down behind it.
+///
+/// Not `windowManager.destroy()`: on Windows that only posts the quit message,
+/// and the window then stays on screen through the whole engine teardown —
+/// several seconds with a large chat open — looking hung.
+Future<void> _letClose() async {
+  await windowManager.setPreventClose(false);
+  await windowManager.close();
 }
 
 /// Closes the window on the user's request, after the run is recorded as
@@ -75,26 +84,26 @@ Future<void> initDesktopWindow() async {
 /// that path. The session marker was left saying `foreground`, which is what
 /// a crash looks like, so every launch after a normal close offered a crash
 /// report. With the close intercepted, the marker and the log are written
-/// first, then the window is destroyed as before.
+/// first, then the close is let through as before.
 class DesktopCloseHandler extends WindowListener {
   final void Function() markClosed;
-  final Future<void> Function() destroy;
+  final Future<void> Function() closeWindow;
 
-  DesktopCloseHandler({required this.markClosed, required this.destroy});
+  DesktopCloseHandler({required this.markClosed, required this.closeWindow});
 
   bool _closing = false;
 
   @override
   void onWindowClose() {
-    // A second request while the first is being honoured (a double click on
-    // the X) must not mark or destroy twice.
+    // The close let through below comes back here as a second request, as
+    // does a double click on the X: neither marks or closes again.
     if (_closing) return;
     _closing = true;
     try {
       markClosed();
     } finally {
       // Whatever the marker did, the user asked to leave: the window goes.
-      unawaited(destroy());
+      unawaited(closeWindow());
     }
   }
 }

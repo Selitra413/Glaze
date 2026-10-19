@@ -490,7 +490,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     _resetAfterDomRework();
     PerfDebug.chatWebViewInitAttempted();
     try {
-      await _waitForJsBridgeReady();
+      await PerfDebug.slowAwait(
+        'chat page bridge ready',
+        _waitForJsBridgeReady,
+      );
       // The WebView is kept alive across chats, so the JS header tracker still
       // holds the previous chat's hidden state and scroll baseline. Clear both
       // before the initial render, or the load's jump to the bottom reads as a
@@ -554,7 +557,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         onSyncExtBlockPanels: _syncExtBlockPanels,
         applyTheme: _applyThemeToBridge,
       );
-      await initializer.run().timeout(_kWebViewInitTimeout);
+      await PerfDebug.slowAwait(
+        'chat page first paint (${widget.messages.length} messages)',
+        () => initializer.run().timeout(_kWebViewInitTimeout),
+      );
       // The list the first frame was rewritten with, for the post-init
       // staleness check below.
       _syncState.paintedDisplayRegexes = initializer.paintedDisplayRegexes;
