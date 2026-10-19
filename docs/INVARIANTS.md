@@ -393,9 +393,21 @@ libraries, as in Memory Books (`SummaryPromptSelection`;
 shortening prompt gets `{{target_tokens}}`. Built-ins are
 read-only; a key that names nothing resolves to the built-in default. A chat
 that still holds a prompt text of its own retells with it until a preset is
-picked, which clears it. The transcript is
-the message text alone: summarizing reads nothing from Ledger or Studio and
+picked, which clears it. The reader may put one instruction in front of all
+three prompts (`SummaryPreamble`, `summaryPreambleProvider`; off by default):
+on, `SummaryGenerationService` prepends its text to the resolved retelling,
+merging and shortening prompt alike — a chat's own text included — so it is
+read first; off, the prompts go as chosen and the text is kept. The transcript
+is the message text alone: summarizing reads nothing from Ledger or Studio and
 runs after every bot turn, Studio on or off.
+
+A summarizer's refusal is not a summary. An answer that is short and opens
+with a refusing phrase (`SummaryRefusal.looksLike`) is rejected with
+`SummaryChainException('refused')` before the size check, by compaction, merge
+and regeneration alike, and a refused shortening keeps the first answer. It
+would otherwise be shorter than its source and be kept as a block, standing in
+for messages with nothing of them in it. Covered by
+`test/summary_preamble_test.dart` and `test/summary_regenerate_test.dart`.
 
 A block whose sources were edited, swiped or deleted is stale: it is not sent,
 its messages return to the prompt, and the next compaction drops it together

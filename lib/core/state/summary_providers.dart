@@ -9,6 +9,7 @@ import '../../features/presets/preset_list_provider.dart';
 import '../llm/summary_service.dart';
 import '../models/preset.dart';
 import '../services/memory_prompt_presets.dart' show MemoryPromptPreset;
+import '../services/summary_preamble.dart';
 import '../services/summary_prompt_presets.dart';
 import 'db_provider.dart';
 import 'shared_prefs_provider.dart';
@@ -245,6 +246,40 @@ class SummaryPromptSelectionNotifier
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setString(prefsKey, jsonEncode(selection.toJson()));
     state = AsyncData(selection);
+  }
+}
+
+/// The instruction put in front of every summary prompt for a model that
+/// refuses to retell what the roleplay got into ([SummaryPreamble]). Global,
+/// like the prompt selection.
+final summaryPreambleProvider =
+    AsyncNotifierProvider<SummaryPreambleNotifier, SummaryPreamble>(
+      SummaryPreambleNotifier.new,
+    );
+
+class SummaryPreambleNotifier extends AsyncNotifier<SummaryPreamble> {
+  static const prefsKey = 'summaryPreamble';
+
+  @override
+  Future<SummaryPreamble> build() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    final raw = prefs.getString(prefsKey);
+    if (raw == null || raw.trim().isEmpty) return const SummaryPreamble();
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return SummaryPreamble.fromJson(decoded);
+      }
+    } catch (e) {
+      debugPrint('[summaryPreamble] unreadable, using defaults: $e');
+    }
+    return const SummaryPreamble();
+  }
+
+  Future<void> save(SummaryPreamble preamble) async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    await prefs.setString(prefsKey, jsonEncode(preamble.toJson()));
+    state = AsyncData(preamble);
   }
 }
 

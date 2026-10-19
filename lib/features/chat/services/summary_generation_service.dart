@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/memory_book_api_config_resolver.dart';
+import '../../../core/llm/summary_refusal.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/summary_block.dart';
+import '../../../core/services/summary_preamble.dart';
 import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
@@ -160,10 +162,7 @@ class SummaryGenerationService {
           cancelToken: cancelToken,
           temperature: slot.generationTemperature,
         );
-        final tokens = estimateTokens(text);
-        if (tokens >= plan.sourceTokens) {
-          throw const SummaryChainException('not_shorter');
-        }
+        final tokens = _acceptedTokens(text, plan.sourceTokens);
         final ids = [for (final m in plan.source) m.id];
         final block = SummaryBlock(
           id: _newId(),
@@ -314,10 +313,7 @@ class SummaryGenerationService {
         );
       }
 
-      final tokens = estimateTokens(text);
-      if (tokens >= sourceTokens) {
-        throw const SummaryChainException('not_shorter');
-      }
+      final tokens = _acceptedTokens(text, sourceTokens);
       final draft = SummaryDraft(
         content: text,
         messageIds: ids,
@@ -462,10 +458,7 @@ class SummaryGenerationService {
           cancelToken: cancelToken,
           temperature: temperature,
         );
-    final tokens = estimateTokens(text);
-    if (tokens >= sourceTokens) {
-      throw const SummaryChainException('not_shorter');
-    }
+    final tokens = _acceptedTokens(text, sourceTokens);
     final ids = [for (final part in parts) ...part.messageIds];
     final merged = SummaryBlock(
       id: _newId(),
@@ -487,31 +480,56 @@ class SummaryGenerationService {
     if (!committed) throw const SummaryChainException('changed');
   }
 
+  /// The summarizer's answer as the size of the block it makes. A refusal is
+  /// not a summary (`refused`), and text no shorter than its source frees
+  /// nothing (`not_shorter`); neither is written.
+  static int _acceptedTokens(String text, int sourceTokens) {
+    if (SummaryRefusal.looksLike(text)) {
+      throw const SummaryChainException('refused');
+    }
+    final tokens = estimateTokens(text);
+    if (tokens >= sourceTokens) {
+      throw const SummaryChainException('not_shorter');
+    }
+    return tokens;
+  }
+
   /// The chat's own prompt text when it still has one, else the chosen
-  /// retelling preset.
+  /// retelling preset — with the reader's preamble in front when it is on.
   Future<String> _retellTemplate(String sessionId) async {
     final own = await _ref
         .read(summaryServiceProvider)
         .getSummaryPrompt(sessionId);
-    if (own != null) return own;
+    if (own != null) return _withPreamble(own);
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomPromptsProvider.future);
-    return SummaryPromptPresets.resolve(selection.retellKey, custom).prompt;
+    return _withPreamble(
+      SummaryPromptPresets.resolve(selection.retellKey, custom).prompt,
+    );
   }
 
   Future<String> _mergeTemplate() async {
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomMergePromptsProvider.future);
-    return SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt;
+    return _withPreamble(
+      SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt,
+    );
   }
 
   Future<String> _shortenTemplate() async {
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomShortenPromptsProvider.future);
-    return SummaryShortenPromptPresets.resolve(
-      selection.shortenKey,
-      custom,
-    ).prompt;
+    return _withPreamble(
+      SummaryShortenPromptPresets.resolve(selection.shortenKey, custom).prompt,
+    );
+  }
+
+  /// [template] behind the preamble ([SummaryPreamble]) when the reader has
+  /// it on: first in every summary prompt, so it is read before the prompt it
+  /// is meant to steer. Off, [template] goes as it is.
+  Future<String> _withPreamble(String template) async {
+    final preamble = await _ref.read(summaryPreambleProvider.future);
+    return preamble.apply(template);
   }
 
   /// Reads the messages fresh, then applies [change] to the blocks as stored

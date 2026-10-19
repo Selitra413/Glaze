@@ -7,6 +7,7 @@ import '../models/chat_message.dart';
 import '../models/summary_block.dart';
 import 'aux_llm_client.dart';
 import 'macro_engine.dart';
+import 'summary_refusal.dart';
 import 'tokenizer.dart';
 import 'transport/llm_protocol.dart';
 import 'transport/llm_capture_context.dart';
@@ -310,8 +311,9 @@ class SummaryService {
   }
 
   /// One summarizer call, and one more to shorten its answer when it came out
-  /// well past [targetTokens]. The shorter text is kept; a failed shortening
-  /// keeps the first answer, which is complete.
+  /// well past [targetTokens]. The shorter text is kept; a failed shortening,
+  /// or one the model refused — shorter than anything — keeps the first
+  /// answer, which is complete.
   Future<String> _summarize({
     required String sessionId,
     required ApiConfig apiConfig,
@@ -344,6 +346,7 @@ class SummaryService {
         temperature: temperature,
         cancelToken: cancelToken,
       );
+      if (SummaryRefusal.looksLike(shorter)) return text;
       return estimateTokens(shorter) < tokens ? shorter : text;
     } catch (_) {
       if (cancelToken?.isCancelled == true) rethrow;

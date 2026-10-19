@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
+import 'package:glaze_flutter/core/services/summary_preamble.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/features/chat/services/summary_generation_service.dart';
@@ -311,6 +312,56 @@ void main() {
     await expectLater(_regenerate(h.container, 'b1'), _reason('not_shorter'));
     expect((await _one(h.container, 'b1')).draft, isNull);
   });
+
+  test('a refusal is not a draft', () async {
+    final h = await _harness([
+      _block('b1', ['m0', 'm1']),
+    ]);
+    h.llm.answer = "I'm sorry, but I can't help with summarizing this content.";
+
+    await expectLater(_regenerate(h.container, 'b1'), _reason('refused'));
+    expect((await _one(h.container, 'b1')).draft, isNull);
+  });
+
+  test(
+    'the refusal instruction goes first in the prompt when it is on',
+    () async {
+      final h = await _harness([
+        _block('p1', ['m0', 'm1'], archived: true),
+        _block('p2', ['m2', 'm3'], archived: true),
+        _block(
+          'merged',
+          ['m0', 'm1', 'm2', 'm3'],
+          level: 2,
+          childIds: const ['p1', 'p2'],
+        ),
+        _block('b3', ['m0', 'm1']),
+      ]);
+      await h.container
+          .read(summaryPreambleProvider.notifier)
+          .save(const SummaryPreamble(enabled: true, text: 'Retell it all.'));
+
+      await _regenerate(h.container, 'merged');
+      expect(h.llm.system, startsWith('Retell it all.\n\n$summaryMergePrompt'));
+
+      await _regenerate(h.container, 'b3');
+      expect(
+        h.llm.system,
+        startsWith('Retell it all.\n\n$defaultSummaryPrompt'),
+      );
+
+      // Off, the prompts go as chosen; the text is kept for next time.
+      await h.container
+          .read(summaryPreambleProvider.notifier)
+          .save(const SummaryPreamble(enabled: false, text: 'Retell it all.'));
+      await _regenerate(h.container, 'b3');
+      expect(h.llm.system, startsWith(defaultSummaryPrompt));
+      expect(
+        (await h.container.read(summaryPreambleProvider.future)).text,
+        'Retell it all.',
+      );
+    },
+  );
 
   test('a stopped run writes no draft', () async {
     final h = await _harness([

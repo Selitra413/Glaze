@@ -11,6 +11,7 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
+import 'package:glaze_flutter/core/services/summary_preamble.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/features/chat/chat_provider.dart';
@@ -373,10 +374,51 @@ void main() {
     expect(find.text('summary_prompt_shorten_label'.tr()), findsOneWidget);
     expect(find.text('summary_prompt_view_current'.tr()), findsOneWidget);
     expect(find.text('memory_prompt_manage'.tr()), findsOneWidget);
+    // The refusal instruction's field shows only once its switch is on.
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Recap (recommended)'), findsOneWidget);
     expect(find.text('Keep continuity (recommended)'), findsOneWidget);
     expect(find.text('Keep facts (recommended)'), findsOneWidget);
+  });
+
+  testWidgets('the refusal instruction is a switch over its text', (
+    tester,
+  ) async {
+    final container = await _seed();
+    await _openSheet(tester, container);
+    await _openSettings(tester);
+
+    await _scrollTo(tester, find.byKey(const Key('summary_preamble')));
+    expect(find.text('summary_preamble_label'.tr()), findsOneWidget);
+    expect(find.text('summary_preamble_hint'.tr()), findsOneWidget);
+    // Off by default, and the text stays out of the way until it is on.
+    expect(find.byKey(const Key('summary_preamble_text')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('summary_preamble')));
+    await tester.pump();
+    await _scrollTo(tester, find.byKey(const Key('summary_preamble_text')));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('summary_preamble_text')))
+          .controller
+          ?.text,
+      SummaryPreamble.defaultText,
+    );
+    await tester.enterText(
+      find.byKey(const Key('summary_preamble_text')),
+      'Retell it all.',
+    );
+    await tester.tap(find.byIcon(Icons.check_rounded));
+    await _settle(tester);
+
+    await tester.runAsync(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(SummaryPreambleNotifier.prefsKey);
+      expect(
+        SummaryPreamble.fromJson(jsonDecode(raw!) as Map<String, dynamic>),
+        const SummaryPreamble(enabled: true, text: 'Retell it all.'),
+      );
+    });
   });
 
   testWidgets('the switch in the settings is the injection master switch', (
