@@ -128,9 +128,8 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     super.initState();
     if (Platform.isWindows) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        debugPrint('[perf] chat view: native view mounting');
-        setState(() => _mountNativeView = true);
+        if (mounted) debugPrint('[perf] chat view: native view mounting');
+        if (mounted) setState(() => _mountNativeView = true);
       });
     }
   }
