@@ -163,6 +163,21 @@ abstract final class AppLog {
     }
   }
 
+  /// The user is closing the app: the window's close button, or the title
+  /// bar's. Records the run as ended on purpose and writes the log out, so
+  /// the next launch does not take this for a crash.
+  ///
+  /// On desktop the window's close button never reaches
+  /// [AppLifecycleListener.onExitRequested] or the `detached` state: Windows
+  /// destroys the window and the process goes with it, with the session
+  /// marker still saying `foreground`. `initDesktopWindow` intercepts the
+  /// close and calls this first.
+  static void markClosed() {
+    _tracker?.update(SessionState.closed);
+    _append(LogLevel.info, 'Window closed by the user');
+    flush();
+  }
+
   static void info(String message) => _append(LogLevel.info, message);
 
   static void warn(String message) => _append(LogLevel.warn, message);

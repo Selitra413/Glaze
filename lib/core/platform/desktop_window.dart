@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
+
+import '../diagnostics/app_log.dart';
 
 const _prefsKey = 'gz_window_geometry';
 const Size _defaultSize = Size(1280, 820);
@@ -51,6 +54,49 @@ Future<void> initDesktopWindow() async {
     await windowManager.focus();
   });
   windowManager.addListener(_GeometryPersister());
+  // The close button no longer destroys the window on its own: the request
+  // comes to [DesktopCloseHandler], which marks the run as closed first.
+  await windowManager.setPreventClose(true);
+  windowManager.addListener(
+    DesktopCloseHandler(
+      markClosed: AppLog.markClosed,
+      destroy: windowManager.destroy,
+    ),
+  );
+}
+
+/// Closes the window on the user's request, after the run is recorded as
+/// ended on purpose.
+///
+/// Closing the window — the system's X on Windows and Linux, the title bar's
+/// own button, Alt+F4 — destroyed the window straight away, and the process
+/// went with it before anything in Dart heard of it: neither
+/// `AppLifecycleListener.onExitRequested` nor the `detached` state fires on
+/// that path. The session marker was left saying `foreground`, which is what
+/// a crash looks like, so every launch after a normal close offered a crash
+/// report. With the close intercepted, the marker and the log are written
+/// first, then the window is destroyed as before.
+class DesktopCloseHandler extends WindowListener {
+  final void Function() markClosed;
+  final Future<void> Function() destroy;
+
+  DesktopCloseHandler({required this.markClosed, required this.destroy});
+
+  bool _closing = false;
+
+  @override
+  void onWindowClose() {
+    // A second request while the first is being honoured (a double click on
+    // the X) must not mark or destroy twice.
+    if (_closing) return;
+    _closing = true;
+    try {
+      markClosed();
+    } finally {
+      // Whatever the marker did, the user asked to leave: the window goes.
+      unawaited(destroy());
+    }
+  }
 }
 
 class _Geometry {
