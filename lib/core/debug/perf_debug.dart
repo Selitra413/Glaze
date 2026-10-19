@@ -141,6 +141,9 @@ abstract final class PerfDebug {
   }
 
   /// Installs the slow-frame logger; no-op unless [logSlowFrames] is set.
+  /// Lines go through `debugPrint`, so a release build with the define on
+  /// writes them to the session log, where the slow phases below sit next to
+  /// the frames they stalled.
   static void installFrameLoggerIfEnabled() {
     if (!logSlowFrames) return;
     WidgetsBinding.instance.addTimingsCallback((timings) {
@@ -148,8 +151,7 @@ abstract final class PerfDebug {
         final buildMs = t.buildDuration.inMicroseconds / 1000.0;
         final rasterMs = t.rasterDuration.inMicroseconds / 1000.0;
         if (buildMs > 17 || rasterMs > 17) {
-          // ignore: avoid_print
-          print(
+          debugPrint(
             '[frame] build=${buildMs.toStringAsFixed(1)}ms '
             'raster=${rasterMs.toStringAsFixed(1)}ms '
             'total=${(t.totalSpan.inMicroseconds / 1000.0).toStringAsFixed(1)}ms',
@@ -158,6 +160,40 @@ abstract final class PerfDebug {
       }
     });
   }
+
+  /// A phase of synchronous work the UI isolate cannot paint through, logged
+  /// when it is long enough to be felt. Always on: a stopwatch costs nothing,
+  /// and the session log then says what the app was doing while it froze —
+  /// "[perf] decode 666 messages (32.1 MB): 412 ms" — instead of leaving the
+  /// freeze to be guessed at from a bug report.
+  static const slowPhaseMs = 50;
+
+  static T slowPhase<T>(String what, T Function() run) {
+    final sw = Stopwatch()..start();
+    try {
+      return run();
+    } finally {
+      final ms = sw.elapsedMilliseconds;
+      if (ms >= slowPhaseMs) debugPrint('[perf] $what: $ms ms');
+    }
+  }
+
+  /// [slowPhase] for work that awaits: the time covers the whole future, so
+  /// it says how long the caller waited, not how long the isolate was busy.
+  static Future<T> slowAwait<T>(String what, Future<T> Function() run) async {
+    final sw = Stopwatch()..start();
+    try {
+      return await run();
+    } finally {
+      final ms = sw.elapsedMilliseconds;
+      if (ms >= slowPhaseMs) debugPrint('[perf] $what: $ms ms (awaited)');
+    }
+  }
+
+  /// "32.1 MB" / "640 KB" for a JSON blob's size in a log line.
+  static String size(int chars) => chars >= 1000000
+      ? '${(chars / 1000000).toStringAsFixed(1)} MB'
+      : '${chars ~/ 1000} KB';
 }
 
 /// Immutable aggregate returned by [PerfDebug.chatWebViewSnapshot].

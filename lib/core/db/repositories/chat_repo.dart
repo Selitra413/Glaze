@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import '../../debug/perf_debug.dart';
 import '../../llm/prompt/exact_lorebook_manifest.dart';
 import 'lorebook_use_manifest_repo.dart';
 import 'session_deletion_queries.dart';
@@ -119,15 +120,20 @@ ORDER BY updated_at DESC
 
   Stream<List<SessionMetadata>> watchAllSessionMetadata() {
     var lastEmit = <SessionMetadata>[];
-    return (_db.select(_db.chatSessions)
-          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
-        .watch()
-        .asyncMap((rows) async {
-          final meta = rows.map(_toMetadata).toList();
-          if (_metadataEqual(lastEmit, meta)) return lastEmit;
-          lastEmit = meta;
-          return meta;
-        });
+    return (_db.select(
+      _db.chatSessions,
+    )..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])).watch().asyncMap((
+      rows,
+    ) async {
+      final meta = PerfDebug.slowPhase(
+        'scan ${rows.length} sessions for the chat list '
+        '(${PerfDebug.size(rows.fold(0, (n, r) => n + r.messagesJson.length))})',
+        () => rows.map(_toMetadata).toList(),
+      );
+      if (_metadataEqual(lastEmit, meta)) return lastEmit;
+      lastEmit = meta;
+      return meta;
+    });
   }
 
   static bool _metadataEqual(List<SessionMetadata> a, List<SessionMetadata> b) {
@@ -485,9 +491,7 @@ ORDER BY updated_at DESC
       final updated = mutate(current);
       if (updated == null) return null;
       if (beforeWrite != null) await beforeWrite(current, updated);
-      final messagesJson = jsonEncode(
-        updated.messages.map((e) => e.toJson()).toList(),
-      );
+      final messagesJson = _encodeMessages(updated.messages);
       final sessionVarsJson = updated.sessionVars.isNotEmpty
           ? jsonEncode(updated.sessionVars)
           : null;
@@ -588,9 +592,7 @@ ORDER BY updated_at DESC
         ),
       );
       if (beforeWrite != null) await beforeWrite(latest, updated);
-      final messagesJson = jsonEncode(
-        updated.messages.map((e) => e.toJson()).toList(),
-      );
+      final messagesJson = _encodeMessages(updated.messages);
       final sessionVarsJson = updated.sessionVars.isNotEmpty
           ? jsonEncode(updated.sessionVars)
           : null;
@@ -754,9 +756,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = _decodeMessages(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -783,11 +783,7 @@ ORDER BY updated_at DESC
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
-        ),
+        ChatSessionsCompanion(messagesJson: Value(_encodeMessages(messages))),
       );
       return true;
     });
@@ -811,9 +807,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = _decodeMessages(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -849,11 +843,7 @@ ORDER BY updated_at DESC
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
-        ),
+        ChatSessionsCompanion(messagesJson: Value(_encodeMessages(messages))),
       );
       return true;
     });
@@ -887,9 +877,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = _decodeMessages(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -983,11 +971,7 @@ ORDER BY updated_at DESC
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
-        ),
+        ChatSessionsCompanion(messagesJson: Value(_encodeMessages(messages))),
       );
       return true;
     });
@@ -1024,9 +1008,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = _decodeMessages(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -1068,11 +1050,7 @@ ORDER BY updated_at DESC
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
-        ),
+        ChatSessionsCompanion(messagesJson: Value(_encodeMessages(messages))),
       );
       return true;
     });
@@ -1103,9 +1081,7 @@ ORDER BY updated_at DESC
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return false;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final messages = _decodeMessages(row.messagesJson);
 
       var found = false;
       for (var i = messages.length - 1; i >= 0; i--) {
@@ -1151,11 +1127,7 @@ ORDER BY updated_at DESC
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
-        ),
+        ChatSessionsCompanion(messagesJson: Value(_encodeMessages(messages))),
       );
       return true;
     });
@@ -1436,11 +1408,7 @@ ORDER BY updated_at DESC
         id: c.sessionId,
         characterId: c.characterId,
         sessionIndex: c.sessionIndex,
-        messages:
-            messages ??
-            (jsonDecode(c.messagesJson) as List)
-                .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-                .toList(),
+        messages: messages ?? _decodeMessages(c.messagesJson),
         updatedAt: c.updatedAt,
         sessionVars: c.sessionVarsJson != null
             ? Map<String, String>.from(jsonDecode(c.sessionVarsJson!) as Map)
@@ -1455,11 +1423,26 @@ ORDER BY updated_at DESC
             : {},
       );
 
+  /// The stored message list as models. Timed: a long chat is one JSON blob,
+  /// and this is where opening it spends its time.
+  static List<ChatMessage> _decodeMessages(String json) => PerfDebug.slowPhase(
+    'decode chat (${PerfDebug.size(json.length)})',
+    () => _decodeChatMessages(json),
+  );
+
+  /// The models as the stored blob. Timed like [_decodeMessages]: every
+  /// message mutation writes the whole chat back.
+  static String _encodeMessages(List<ChatMessage> messages) =>
+      PerfDebug.slowPhase(
+        'encode chat (${messages.length} messages)',
+        () => jsonEncode(messages.map((e) => e.toJson()).toList()),
+      );
+
   ChatSessionsCompanion _toCompanion(ChatSession m) => ChatSessionsCompanion(
     sessionId: Value(m.id),
     characterId: Value(m.characterId),
     sessionIndex: Value(m.sessionIndex),
-    messagesJson: Value(jsonEncode(m.messages.map((e) => e.toJson()).toList())),
+    messagesJson: Value(_encodeMessages(m.messages)),
     updatedAt: Value(m.updatedAt),
     sessionVarsJson: Value(
       m.sessionVars.isNotEmpty ? jsonEncode(m.sessionVars) : null,
