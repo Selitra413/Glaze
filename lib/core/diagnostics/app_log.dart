@@ -125,7 +125,7 @@ abstract final class AppLog {
         current: SessionRecord(
           logFile: p.relative(path, from: root).replaceAll('\\', '/'),
           startedAt: startedAt,
-          state: _stateFor(WidgetsBinding.instance.lifecycleState),
+          state: _initialState(WidgetsBinding.instance.lifecycleState),
         ),
       );
       _tracker = tracker;
@@ -271,6 +271,15 @@ abstract final class AppLog {
     _append(LogLevel.info, 'Lifecycle: ${state.name}');
     if (state != AppLifecycleState.resumed) flush();
   }
+
+  /// The state a run starts in. A desktop app reads `detached` until its
+  /// window is first focused, which on Windows is only once the user clicks
+  /// it — a run that dies before that would read as closed on purpose. The
+  /// run has only just begun, so it is on its way to the screen.
+  static SessionState _initialState(AppLifecycleState? state) =>
+      state == AppLifecycleState.detached
+      ? SessionState.foreground
+      : _stateFor(state);
 
   static SessionState _stateFor(AppLifecycleState? state) => switch (state) {
     null ||
