@@ -14,7 +14,7 @@ import '../theme/ui_scale.dart';
 const double kGlazeSheetWindowMaxWidth = 640;
 
 /// Fraction of the window height a desktop sheet window may occupy.
-const double _kGlazeSheetWindowHeightFactor = 0.85;
+const double kGlazeSheetWindowHeightFactor = 0.85;
 
 /// Outline of a modal bottom sheet: the top edge only, thinning out along the
 /// rounded corners. Paint it over the content — the sheet's pinned header scrim
@@ -298,7 +298,7 @@ class _GlazeSheetWindowState extends ConsumerState<GlazeSheetWindow> {
     final width = bounds.width * 0.92 < kGlazeSheetWindowMaxWidth
         ? bounds.width * 0.92
         : kGlazeSheetWindowMaxWidth;
-    final maxHeight = bounds.height * _kGlazeSheetWindowHeightFactor;
+    final maxHeight = bounds.height * kGlazeSheetWindowHeightFactor;
     final resizable = widget.chrome && !widget.contentSized;
 
     final Widget framed = widget.chrome

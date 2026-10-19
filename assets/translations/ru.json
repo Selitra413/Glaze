@@ -584,6 +584,8 @@
   "summary_error_sources_gone": "Сообщений этого блока не осталось, пересказывать нечего. Удалите блок.",
   "summary_draft_discard": "Удалить черновик",
   "summary_draft_stale": "Сообщения изменились, черновик устарел — перегенерируйте его",
+  "summary_saved": "Саммари обновлено",
+  "summary_draft_saved": "Черновик сохранён",
   "label_depth": "Глубина (Depth)",
   "label_prefix": "Префикс",
   "placeholder_depth": "0 = в конце контекста",

@@ -12,6 +12,7 @@ import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_expansion_tile.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../chat_provider.dart';
 import '../services/summary_generation_service.dart';
 import '../state/summary_regeneration_provider.dart';
@@ -72,21 +73,30 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
 
   /// Runs a change to the chain, then reloads it. Errors land under the
   /// action bar rather than in a toast: a summarizer failure needs reading.
-  Future<void> _run(Future<void> Function(ChatSession session) action) async {
+  /// Returns whether the change went through.
+  Future<bool> _run(Future<void> Function(ChatSession session) action) async {
     final session = _session;
-    if (session == null || _busy) return;
+    if (session == null || _busy) return false;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await action(session);
+      return true;
     } catch (e) {
       if (mounted) setState(() => _error = _describe(e));
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
       await _load();
     }
+  }
+
+  /// Says a saved change landed — the reader pressed Save or Approve and the
+  /// sheet gives no other sign of it.
+  void _saved(bool ok, String message) {
+    if (ok && mounted) GlazeToast.show(context, message.tr());
   }
 
   Object _describe(Object error) {
@@ -146,8 +156,11 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     if (session != null) _regeneration.cancel(session.id, block.id);
   }
 
-  Future<void> _approve(SummaryBlock block) => _run(
-    (session) => _generator.approveDraft(session: session, blockId: block.id),
+  Future<void> _approve(SummaryBlock block) async => _saved(
+    await _run(
+      (session) => _generator.approveDraft(session: session, blockId: block.id),
+    ),
+    'summary_saved',
   );
 
   Future<void> _discardDraft(SummaryBlock block) => _run(
@@ -158,39 +171,51 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     final text = await SummaryBlockEditorSheet.show(
       context,
       title: 'summary_note_add'.tr(),
-      placeholder: 'summary_note_hint'.tr(),
+      description: 'summary_note_hint'.tr(),
     );
     if (text == null) return;
-    await _run(
-      (session) => _generator.addNote(session: session, content: text),
+    _saved(
+      await _run(
+        (session) => _generator.addNote(session: session, content: text),
+      ),
+      'summary_saved',
     );
   }
 
   /// Tapping a card edits what it shows: the draft when there is one, as on a
-  /// Memory Books draft, the block otherwise.
+  /// Memory Books draft, the block otherwise. The sheet is named by the
+  /// messages the block covers, as a memory entry is.
   Future<void> _edit(SummaryBlock block) async {
     final draft = block.draft;
     final current = draft?.content ?? block.content;
     final text = await SummaryBlockEditorSheet.show(
       context,
-      title: draft == null
-          ? _title(block)
-          : '${_title(block)} · ${'memory_books_badge_draft'.tr()}',
+      title: block.isNote ? _level(block) : _range(block) ?? _level(block),
+      description: block.isNote
+          ? 'summary_note_hint'.tr()
+          : [
+              _level(block),
+              if (draft != null) 'memory_books_badge_draft'.tr(),
+              'summary_tokens_n'.tr(args: ['${draft?.tokens ?? block.tokens}']),
+            ].join(' · '),
       initialValue: current,
     );
     if (text == null || text == current.trim()) return;
-    await _run(
-      (session) => draft == null
-          ? _generator.editBlock(
-              session: session,
-              blockId: block.id,
-              content: text,
-            )
-          : _generator.editDraft(
-              session: session,
-              blockId: block.id,
-              content: text,
-            ),
+    _saved(
+      await _run(
+        (session) => draft == null
+            ? _generator.editBlock(
+                session: session,
+                blockId: block.id,
+                content: text,
+              )
+            : _generator.editDraft(
+                session: session,
+                blockId: block.id,
+                content: text,
+              ),
+      ),
+      draft == null ? 'summary_saved' : 'summary_draft_saved',
     );
   }
 
@@ -240,9 +265,33 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     return confirmed == true;
   }
 
-  static String _title(SummaryBlock block) => block.isNote
+  static String _level(SummaryBlock block) => block.isNote
       ? 'summary_note'.tr()
       : 'summary_block_level'.tr(args: ['${block.level}']);
+
+  /// The level, and the messages the block covers — "Level 1 · 641-650", as a
+  /// Memory Books row reads "title · range".
+  String _title(SummaryBlock block) => switch (_range(block)) {
+    final range? => '${_level(block)} · $range',
+    null => _level(block),
+  };
+
+  /// The messages [block] covers, numbered as the chat counts them: "641-650",
+  /// the way a Memory Books entry is named. Null for a note, and when none of
+  /// its messages is left.
+  String? _range(SummaryBlock block) {
+    final messages = _session?.messages ?? const <ChatMessage>[];
+    final ids = block.messageIds.toSet();
+    int? first;
+    int? last;
+    for (var i = 0; i < messages.length; i++) {
+      if (!ids.contains(messages[i].id)) continue;
+      first ??= i + 1;
+      last = i + 1;
+    }
+    if (first == null) return null;
+    return first == last ? '$first' : '$first-$last';
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -306,6 +306,9 @@ void main() {
     expect(stored.draft, isNull);
     expect(find.text('memory_books_badge_draft'.tr()), findsNothing);
     expect(find.byTooltip('memory_books_btn_approve'.tr()), findsNothing);
+    // Approving says so, as Save does.
+    expect(find.text('summary_saved'.tr()), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
   });
 
   testWidgets('tapping a draft edits it in the Memory Books editor', (
@@ -321,6 +324,8 @@ void main() {
 
     await tester.tap(find.text('Alice was greeted warmly at the gate.'));
     await _settle(tester);
+    // Named by the messages it covers, as a memory entry is.
+    expect(find.text('1'), findsOneWidget);
     await tester.enterText(
       find.widgetWithText(TextField, 'Alice was greeted warmly at the gate.'),
       'Alice was let in.',
@@ -332,6 +337,8 @@ void main() {
     expect(stored.draft?.content, 'Alice was let in.');
     expect(stored.content, 'Alice was greeted.');
     expect(find.text('Alice was let in.'), findsOneWidget);
+    expect(find.text('summary_draft_saved'.tr()), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
   });
 
   testWidgets('the header button opens the settings, switch and all', (
