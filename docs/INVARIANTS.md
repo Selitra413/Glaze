@@ -401,6 +401,16 @@ returns its messages. A row from before blocks reads as one level-0 note that
 covers no messages. Covered by `test/summary_chain_test.dart` and
 `test/summary_service_test.dart`.
 
+Regenerating (`SummaryGenerationService.regenerateBlock`) writes one active
+block again in place — same id, level, parts and place in the chain — on the
+prompts chosen now. A level-1 block retells its messages as they read today,
+with the live blocks before it as context, and gets a fresh fingerprint, so a
+stale one comes back. A merge is merged again from its archived parts; a stale
+merge is refused (`stale_merge`), since its parts are as out of date as it is.
+Notes are never regenerated. The new text must be shorter than its source and
+is committed only if its sources did not change meanwhile. Covered by
+`test/summary_regenerate_test.dart`.
+
 ### INV-S6: Summarized messages are not sent ✅ ENFORCED
 
 `PromptPayloadBuilder.collectGenerationContext` and

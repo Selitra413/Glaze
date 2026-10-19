@@ -578,6 +578,8 @@
   "summary_error_mixed_levels": "Select blocks of the same level.",
   "summary_error_select_two": "Select at least two blocks.",
   "summary_error_changed": "The chat changed while the summary was being written. Try again.",
+  "summary_error_stale_merge": "The messages under this merge changed, so its parts are out of date too. Delete the merge to get its parts back, then regenerate them.",
+  "summary_error_sources_gone": "None of this block's messages are left to retell. Delete the block instead.",
   "label_depth": "Depth",
   "label_prefix": "Prefix",
   "placeholder_depth": "0 = at the end",

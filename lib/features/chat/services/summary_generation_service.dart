@@ -142,16 +142,10 @@ class SummaryGenerationService {
         // A block barely smaller than its messages frees nothing.
         if (target * 11 ~/ 10 >= plan.sourceTokens) break;
 
-        final firstSource = messages.indexWhere(
-          (m) => m.id == plan.source.first.id,
-        );
-        final position = {
-          for (var i = 0; i < messages.length; i++) messages[i].id: i,
-        };
-        final earlier = SummaryChain.live(blocks, messages).where(
-          (b) =>
-              b.isNote ||
-              b.messageIds.any((id) => (position[id] ?? -1) < firstSource),
+        final earlier = SummaryChain.liveBefore(
+          blocks,
+          messages,
+          plan.source.first.id,
         );
 
         final text = await service.summarizeMessages(
@@ -230,6 +224,117 @@ class SummaryGenerationService {
         temperature: slot.generationTemperature,
         cancelToken: cancelToken,
       );
+    });
+  }
+
+  /// Writes an active block again over the same sources, on the prompts
+  /// chosen now. A level-1 block retells its messages as they read today,
+  /// which also brings a stale one back; a merge is merged again from its
+  /// parts. A merge whose messages changed is refused (`stale_merge`): its
+  /// parts are as out of date as it is, and deleting it gives them back.
+  Future<void> regenerateBlock({
+    required String charId,
+    required ChatSession session,
+    required String blockId,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final messages = await _messages(session.id, session.messages);
+      final byId = SummaryChain.index(messages);
+      final blocks = await service.getBlocks(session.id);
+      final block = blocks
+          .where((b) => b.id == blockId && !b.archived && !b.isNote)
+          .firstOrNull;
+      if (block == null) throw const SummaryChainException('not_live');
+
+      final String text;
+      final List<String> ids;
+      final int sourceTokens;
+      if (block.childIds.isEmpty) {
+        final source = [
+          for (final id in block.messageIds)
+            if (byId[id] case final message?
+                when SummaryChain.isSummarizable(message))
+              message,
+        ];
+        if (source.isEmpty) throw const SummaryChainException('sources_gone');
+        ids = [for (final m in source) m.id];
+        sourceTokens = source.fold(
+          0,
+          (sum, m) => sum + estimateTokens(m.content),
+        );
+        final earlier = SummaryChain.liveBefore(
+          blocks,
+          messages,
+          ids.first,
+        ).where((b) => b.id != block.id);
+        text = await service.summarizeMessages(
+          sessionId: session.id,
+          source: source,
+          apiConfig: apiConfig,
+          targetTokens: _targetFor(sourceTokens, settings),
+          earlierSummary: SummaryChain.render(earlier),
+          customPrompt: await _retellTemplate(session.id),
+          shortenTemplate: await _shortenTemplate(),
+          macroContext: _macroContext(charId: charId, session: session),
+          cancelToken: cancelToken,
+          temperature: slot.generationTemperature,
+        );
+      } else {
+        if (SummaryChain.isStale(block, byId)) {
+          throw const SummaryChainException('stale_merge');
+        }
+        final parts = [
+          for (final id in block.childIds)
+            ?blocks.where((b) => b.id == id).firstOrNull,
+        ];
+        if (parts.length != block.childIds.length) {
+          throw const SummaryChainException('not_live');
+        }
+        ids = block.messageIds;
+        sourceTokens = parts.fold(0, (sum, b) => sum + b.tokens);
+        text = await service.mergeBlocks(
+          sessionId: session.id,
+          parts: parts,
+          apiConfig: apiConfig,
+          targetTokens: _targetFor(sourceTokens, settings),
+          template: await _mergeTemplate(),
+          shortenTemplate: await _shortenTemplate(),
+          cancelToken: cancelToken,
+          temperature: slot.generationTemperature,
+        );
+      }
+
+      final tokens = estimateTokens(text);
+      if (tokens >= sourceTokens) {
+        throw const SummaryChainException('not_shorter');
+      }
+      final written = SummaryBlock(
+        id: block.id,
+        level: block.level,
+        content: text,
+        messageIds: ids,
+        sourceHash: SummaryChain.fingerprint(ids, byId),
+        childIds: block.childIds,
+        tokens: tokens,
+        sourceTokens: sourceTokens,
+        createdAt: block.createdAt,
+      );
+      final committed = await _commit(session.id, messages, (current, now) {
+        // Edited while the summarizer was writing: the new text describes
+        // messages that no longer read that way.
+        if (SummaryChain.isStale(written, SummaryChain.index(now))) {
+          return null;
+        }
+        return SummaryChain.commitRegenerated(current, written);
+      });
+      if (!committed) throw const SummaryChainException('changed');
     });
   }
 

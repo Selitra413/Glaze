@@ -275,6 +275,27 @@ class SummaryChain {
     ).where((b) => !isStale(b, byId)).toList(growable: false);
   }
 
+  /// Live blocks that come before [firstMessageId] in story order, notes
+  /// included: the earlier summary a retelling of the run starting there is
+  /// handed as context.
+  static List<SummaryBlock> liveBefore(
+    List<SummaryBlock> blocks,
+    List<ChatMessage> messages,
+    String firstMessageId,
+  ) {
+    final position = {
+      for (var i = 0; i < messages.length; i++) messages[i].id: i,
+    };
+    final first = position[firstMessageId] ?? messages.length;
+    return live(blocks, messages)
+        .where(
+          (b) =>
+              b.isNote ||
+              b.messageIds.any((id) => (position[id] ?? -1) < first),
+        )
+        .toList(growable: false);
+  }
+
   static String render(Iterable<SummaryBlock> blocks) => blocks
       .map((b) => b.content.trim())
       .where((text) => text.isNotEmpty)
@@ -533,6 +554,21 @@ class SummaryChain {
       for (final block in blocks)
         children.contains(block.id) ? block.copyWith(archived: true) : block,
       merged,
+    ];
+  }
+
+  /// Puts [written] in place of the active block with its id — the same
+  /// block written again over its sources. Throws when that block is no
+  /// longer active.
+  static List<SummaryBlock> commitRegenerated(
+    List<SummaryBlock> blocks,
+    SummaryBlock written,
+  ) {
+    if (!blocks.any((b) => b.id == written.id && !b.archived)) {
+      throw const SummaryChainException('not_live');
+    }
+    return [
+      for (final block in blocks) block.id == written.id ? written : block,
     ];
   }
 

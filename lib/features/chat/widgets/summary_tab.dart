@@ -16,13 +16,15 @@ import '../services/summary_generation_service.dart';
 import 'memory/memory_books_controls.dart';
 
 const Color _kOrange = Color(0xFFFF9800);
+const Color _kAmber = Color(0xFFFFC107);
 
 /// Summary tab of the Memory sheet.
 ///
 /// The summary is a chain of blocks (see [SummaryBlock]): each retells a run
 /// of old messages and is sent in their place. The tab lists the active
 /// chain in story order, the archive of merged-away blocks below it, and the
-/// actions that change the chain — compact now, merge a selection, add a note.
+/// actions that change the chain — compact now, merge a selection, add a note,
+/// write one block again.
 ///
 /// Everything else — the master switch, the template, when compaction runs,
 /// the injection point — is behind the header's settings button, in
@@ -42,6 +44,9 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   bool _loading = true;
   bool _busy = false;
   Object? _error;
+
+  /// The block being written again, so its card can say so.
+  String? _regenerating;
 
   @override
   void initState() {
@@ -93,6 +98,8 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       'not_adjacent' => 'summary_error_not_adjacent'.tr(),
       'mixed_levels' => 'summary_error_mixed_levels'.tr(),
       'select_two' => 'summary_error_select_two'.tr(),
+      'stale_merge' => 'summary_error_stale_merge'.tr(),
+      'sources_gone' => 'summary_error_sources_gone'.tr(),
       _ => 'summary_error_changed'.tr(),
     };
   }
@@ -114,6 +121,19 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   Future<void> _mergeSelected() => _run((session) async {
     await _generator.mergeSelected(session: session, blockIds: {..._selected});
     _selected.clear();
+  });
+
+  Future<void> _regenerate(SummaryBlock block) => _run((session) async {
+    setState(() => _regenerating = block.id);
+    try {
+      await _generator.regenerateBlock(
+        charId: widget.charId,
+        session: session,
+        blockId: block.id,
+      );
+    } finally {
+      if (mounted) setState(() => _regenerating = null);
+    }
   });
 
   Future<void> _addNote() async {
@@ -255,6 +275,11 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                               }),
                         onEdit: () => _edit(block),
                         onDelete: () => _delete(block),
+                        onRegenerate: block.isNote
+                            ? null
+                            : () => _regenerate(block),
+                        regenerating: _regenerating == block.id,
+                        busy: _busy,
                       ),
                     if (archived.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -370,6 +395,14 @@ class _BlockCard extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
+  /// Null for a note and for the archive: neither is written by the
+  /// summarizer again.
+  final VoidCallback? onRegenerate;
+  final bool regenerating;
+
+  /// Another change to the chain is running.
+  final bool busy;
+
   const _BlockCard({
     required this.block,
     required this.title,
@@ -378,6 +411,9 @@ class _BlockCard extends StatelessWidget {
     this.onToggleSelected,
     this.onEdit,
     this.onDelete,
+    this.onRegenerate,
+    this.regenerating = false,
+    this.busy = false,
   });
 
   @override
@@ -477,6 +513,21 @@ class _BlockCard extends StatelessWidget {
               color: cs.onSurfaceVariant,
             ),
           ),
+          // The same tile a Memory Books draft has under its body: the action
+          // is worth a word, not an unlabelled glyph in the menu.
+          if (onRegenerate != null) ...[
+            const SizedBox(height: 8),
+            MemoryActionTile(
+              icon: regenerating
+                  ? Icons.autorenew_rounded
+                  : Icons.refresh_rounded,
+              label: regenerating
+                  ? 'summary_generating'.tr()
+                  : 'memory_books_btn_regenerate'.tr(),
+              accent: _kAmber,
+              onTap: busy ? null : onRegenerate,
+            ),
+          ],
         ],
       ),
     );

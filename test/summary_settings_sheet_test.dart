@@ -28,7 +28,22 @@ import 'package:glaze_flutter/shared/widgets/glaze_action_button.dart';
 const _charId = 'char-summary';
 const _sessionId = 'session-summary';
 
-Future<ProviderContainer> _seed() async {
+const _hello = ChatMessage(
+  id: 'm1',
+  role: 'user',
+  content: 'Hello',
+  timestamp: 1,
+);
+
+const _note = SummaryBlock(
+  id: 'note',
+  level: 0,
+  content: 'They reached the pass after dark.',
+);
+
+Future<ProviderContainer> _seed({
+  List<SummaryBlock> blocks = const [_note],
+}) async {
   SharedPreferences.setMockInitialValues({});
   ChatSessionService.clearCache();
   final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -51,23 +66,15 @@ Future<ProviderContainer> _seed() async {
           id: _sessionId,
           characterId: _charId,
           sessionIndex: 0,
-          messages: [
-            ChatMessage(id: 'm1', role: 'user', content: 'Hello', timestamp: 1),
-          ],
+          messages: [_hello],
         ),
       );
   await container
       .read(summaryServiceProvider)
       .saveBlocks(
         sessionId: _sessionId,
-        blocks: const [
-          SummaryBlock(
-            id: 'note',
-            level: 0,
-            content: 'They reached the pass after dark.',
-          ),
-        ],
-        messages: const [],
+        blocks: blocks,
+        messages: const [_hello],
       );
   await container.read(chatProvider(_charId).future);
   return container;
@@ -179,6 +186,31 @@ void main() {
     expect(find.text('summary_trigger_label'.tr()), findsNothing);
     // …and neither is the master switch, which was in the header.
     expect(find.byType(Switch), findsNothing);
+    // A note is the reader's own text: nothing to regenerate.
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsNothing);
+  });
+
+  testWidgets('a retold block can be regenerated, as a Memory Books draft', (
+    tester,
+  ) async {
+    final container = await _seed(
+      blocks: [
+        _note,
+        SummaryBlock(
+          id: 'b1',
+          level: 1,
+          content: 'Alice was greeted.',
+          messageIds: const ['m1'],
+          sourceHash: SummaryChain.fingerprint(const [
+            'm1',
+          ], SummaryChain.index(const [_hello])),
+        ),
+      ],
+    );
+    await _openSheet(tester, container);
+
+    expect(find.text('Alice was greeted.'), findsOneWidget);
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsOneWidget);
   });
 
   testWidgets('the header button opens the settings, switch and all', (
