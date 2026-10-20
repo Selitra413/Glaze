@@ -2004,7 +2004,7 @@ void main() {
             'stays in step with the trackpad replay and the edit textarea',
       );
       expect(
-        _bridgeAsset('trackpad_scroll.js'),
+        _bridgeAsset('scroll_relay.js'),
         contains('export const WHEEL_PIXEL_SCALE = 1'),
         reason:
             'WHEEL_PIXEL_SCALE=1 scrolls one CSS pixel per wheel delta unit — '

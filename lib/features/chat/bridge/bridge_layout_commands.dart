@@ -134,4 +134,36 @@ class LayoutBridgeCommands {
       '${x.toStringAsFixed(1)}, ${y.toStringAsFixed(1)})',
     );
   }
+
+  /// Replays a Windows mouse-wheel notch as a smooth scroll inside the page.
+  ///
+  /// `flutter_inappwebview_windows` does forward the notch to WebView2, but
+  /// hands it Flutter's delta — logical pixels, divided by the device pixel
+  /// ratio — as wheel units, 120 to a notch, so the page sees a fraction of a
+  /// notch and jumps by it. The Flutter side captures the notch as well,
+  /// converts it back to the CSS pixels a browser would scroll and hands it
+  /// here; the page spreads it over the frames that follow and, once
+  /// [relayNativeWheel] is on, drops the plugin's copy.
+  ///
+  /// Same units and sign as [trackpadScroll].
+  Future<void> wheelScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) {
+    return _host.evalJs(
+      'window.bridge?.wheelScroll('
+      '${dx.toStringAsFixed(2)}, ${dy.toStringAsFixed(2)}, '
+      '${x.toStringAsFixed(1)}, ${y.toStringAsFixed(1)})',
+    );
+  }
+
+  /// Tells the page that the mouse wheel arrives through [wheelScroll] from
+  /// now on, so the trusted `wheel` event the plugin forwards for the same
+  /// notch is to be ignored. Off by default: every other platform keeps its
+  /// native wheel.
+  Future<void> relayNativeWheel(bool on) {
+    return _host.evalJs('window.bridge?.relayNativeWheel($on)');
+  }
 }

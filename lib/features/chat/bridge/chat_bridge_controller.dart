@@ -992,6 +992,13 @@ class ChatBridgeController {
     required double x,
     required double y,
   }) => layout.trackpadScroll(dx: dx, dy: dy, x: x, y: y);
+  Future<void> wheelScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) => layout.wheelScroll(dx: dx, dy: dy, x: x, y: y);
+  Future<void> relayNativeWheel(bool on) => layout.relayNativeWheel(on);
 
   // Memory
   Future<void> updateMemoryBookData({

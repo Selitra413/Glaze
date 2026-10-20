@@ -19,7 +19,7 @@ import '../bridge/chat_webview_settings.dart';
 import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
-import 'chat_webview_trackpad_scroll.dart';
+import 'chat_webview_scroll_relay.dart';
 import 'message_scripts_prompt_sheet.dart';
 import 'webview_callbacks.dart';
 
@@ -304,10 +304,11 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
         Positioned.fill(
           child: IgnorePointer(
             ignoring: covered,
-            // Windows touchpad panning is forwarded by this wrapper. Keeping it
-            // below IgnorePointer freezes native interaction during a switch.
+            // Windows touchpad panning and wheel notches are forwarded by this
+            // wrapper. Keeping it below IgnorePointer freezes native
+            // interaction during a switch.
             child: _mountNativeView
-                ? ChatWebViewTrackpadScroll(
+                ? ChatWebViewScrollRelay(
                     charId: widget.charId,
                     child: InAppWebView(
                       key: ValueKey<int>(widget.rebuildGeneration),

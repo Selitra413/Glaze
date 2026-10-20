@@ -1,6 +1,6 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
-import { WHEEL_PIXEL_SCALE } from './trackpad_scroll.js';
+import { WHEEL_PIXEL_SCALE } from './scroll_relay.js';
 
 export class EditController {
   constructor(sendToFlutter) {
