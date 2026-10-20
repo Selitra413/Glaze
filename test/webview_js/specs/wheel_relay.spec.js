@@ -49,12 +49,6 @@ const wheel = (page, dy) =>
     [dy, CURSOR],
   );
 
-const twoFrames = (page) =>
-  page.evaluate(
-    () => new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
-
 const settled = (page, target) =>
   expect.poll(async () => Math.abs((await scrollTop(page)) - target) < 0.6, {
     timeout: 3000,
@@ -66,14 +60,31 @@ test('a notch scrolls its whole distance over several frames, not in one jump', 
   const start = await scrollTop(page);
   expect(start).toBeGreaterThan(1000);
 
-  await wheel(page, -300);
-  await twoFrames(page);
-  const early = await scrollTop(page);
-  // Moving already, but still on its way.
-  expect(early).toBeLessThan(start);
-  expect(start - early).toBeLessThan(250);
+  // Nothing moves in the call itself: the whole notch is owed to the frames
+  // that follow, and every position the chat passes through is recorded.
+  const owed = await page.evaluate(([d, at]) => {
+    const c = document.getElementById('chat-container');
+    window.bridge.wheelScroll(0, d, at.x, at.y);
+    const positions = [c.scrollTop];
+    window.__positions = positions;
+    const until = performance.now() + 3000;
+    const sample = () => {
+      const st = c.scrollTop;
+      if (st !== positions[positions.length - 1]) positions.push(st);
+      if (performance.now() < until) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    return { moved: c.scrollTop, pending: window.bridge._scrollRelay.pendingWheel.dy };
+  }, [-300, CURSOR]);
+  expect(owed.moved).toBe(start);
+  expect(owed.pending).toBe(-300);
 
   await settled(page, start - 300);
+  // Several stops on the way — a frame can be late and carry a bigger share,
+  // but never the whole distance at once.
+  const positions = await page.evaluate(() => window.__positions);
+  const onTheWay = positions.filter((p) => p < start && p > start - 300);
+  expect(onTheWay.length).toBeGreaterThanOrEqual(3);
 });
 
 test('notches in a row add up', async ({ page }) => {
