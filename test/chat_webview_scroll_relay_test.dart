@@ -87,7 +87,11 @@ void main() {
       expect(emitted, hasLength(1), reason: 'an idle flush must not emit');
     });
 
-    test('reports the cursor position of the latest event', () {
+    // testWidgets from here on: the speed is read through a VelocityTracker,
+    // which asks the gesture binding for its clock.
+    testWidgets('reports the cursor position of the latest event', (
+      tester,
+    ) async {
       Offset? seen;
       final sink = ScrollRelaySink((dx, dy, position) => seen = position);
 
@@ -109,6 +113,54 @@ void main() {
       sink.flush();
 
       expect(calls, 0);
+    });
+
+    testWidgets(
+      'reports the fingers\' speed at lift-off, after the last delta',
+      (tester) async {
+        final log = <String>[];
+        final sink = ScrollRelaySink(
+          (dx, dy, position) => log.add('scroll $dy'),
+          onEnd: (v) => log.add('end ${v.dy.round()}'),
+        );
+
+        // Fingers moving up 20 px every 10 ms: 2000 px/s, which flings the
+        // content down — a positive wheel-sign speed.
+        sink.start(PointerPanZoomStartEvent(timeStamp: Duration.zero));
+        for (var i = 1; i <= 4; i++) {
+          sink.update(
+            PointerPanZoomUpdateEvent(
+              timeStamp: Duration(milliseconds: 10 * i),
+              pan: Offset(0, -20.0 * i),
+              panDelta: const Offset(0, -20),
+            ),
+          );
+        }
+        sink.end(
+          PointerPanZoomEndEvent(timeStamp: const Duration(milliseconds: 40)),
+        );
+        sink.flush();
+
+        expect(log, ['scroll 80.0', 'end 2000']);
+      },
+    );
+
+    testWidgets('a pan that ends without moving reports no speed to speak of', (
+      tester,
+    ) async {
+      Offset? velocity;
+      final sink = ScrollRelaySink(
+        (dx, dy, position) {},
+        onEnd: (v) => velocity = v,
+      );
+
+      sink.start(PointerPanZoomStartEvent(timeStamp: Duration.zero));
+      sink.end(
+        PointerPanZoomEndEvent(timeStamp: const Duration(milliseconds: 40)),
+      );
+      sink.flush();
+
+      expect(velocity, Offset.zero);
     });
 
     testWidgets('coalesces a burst of pan updates to one call per frame', (
@@ -233,9 +285,23 @@ void main() {
 
     test('bridge exposes the relay to Flutter', () {
       expect(bridgeControllerJs, contains('trackpadScroll(dx, dy, x, y)'));
+      expect(bridgeControllerJs, contains('trackpadScrollStart()'));
+      expect(bridgeControllerJs, contains('trackpadScrollEnd(vx, vy)'));
       expect(bridgeControllerJs, contains('wheelScroll(dx, dy, x, y)'));
       expect(bridgeControllerJs, contains('relayNativeWheel(on)'));
       expect(bridgeControllerJs, contains('new ScrollRelay('));
+    });
+
+    test('evens a pan out over a frame or two and carries a flick on', () {
+      // The embedder's per-frame sums carry the pad's sample jitter, and stop
+      // dead when the fingers leave; the page is what smooths and glides.
+      expect(relayJs, contains('export const PAN_SMOOTHING_MS = 40;'));
+      expect(relayJs, contains('Math.exp(-dt / PAN_SMOOTHING_MS)'));
+      expect(relayJs, contains('export const FLING_DECAY_MS = 350;'));
+      expect(relayJs, contains('export const FLING_MAX_PX_PER_MS = 8;'));
+      expect(relayJs, contains('panEnd(vx, vy)'));
+      // A finger on the pad or a wheel notch takes over from a glide.
+      expect(relayJs, contains('panStart() {\n    this._stopFling();'));
     });
 
     test('undoes the page wheel scale so the pan tracks the finger 1:1', () {
@@ -290,9 +356,11 @@ void main() {
       );
     });
 
-    test('does not save up a notch past the edge of the chat', () {
+    test('does not save up a notch, a pan or a glide past the edge', () {
       expect(relayJs, contains('!this._canScrollAt(0, stepY)'));
-      expect(relayJs, contains('this._pendingY = 0;'));
+      expect(relayJs, contains('this._owedWheelY = 0;'));
+      expect(relayJs, contains('this._owedPanY = 0;'));
+      expect(relayJs, contains('this._flingVY = 0;'));
     });
   });
 }

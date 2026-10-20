@@ -351,10 +351,22 @@ export class Bridge {
 
   /* ---------- Scroll / load-more ---------- */
 
-  // Windows touchpad pan replayed by Flutter as a wheel at the cursor. See
-  // ./scroll_relay.js for why the embedder can't deliver it itself.
+  // Windows touchpad pan relayed by Flutter, a frame's worth in CSS pixels;
+  // evened out and followed a frame or two behind. See ./scroll_relay.js for
+  // why the embedder can't deliver it itself.
   trackpadScroll(dx, dy, x, y) {
-    this._scrollRelay.scrollBy(dx, dy, x, y);
+    this._scrollRelay.pan(dx, dy, x, y);
+  }
+
+  // The fingers touched the pad: a flick still gliding stops.
+  trackpadScrollStart() {
+    this._scrollRelay.panStart();
+  }
+
+  // The fingers left the pad at (vx, vy) CSS px/s, wheel sign: the chat
+  // carries the motion on and lets it die away, as a Flutter list does.
+  trackpadScrollEnd(vx, vy) {
+    this._scrollRelay.panEnd(vx, vy);
   }
 
   // Windows mouse-wheel notch relayed by Flutter, in the CSS pixels a browser

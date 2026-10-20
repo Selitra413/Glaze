@@ -15,16 +15,26 @@ import '../bridge/chat_bridge_registry.dart';
 /// than the display refreshes, and every emission is a platform-channel round
 /// trip into the WebView, so the deltas are summed and flushed from a
 /// post-frame callback.
+///
+/// For a pan it also keeps the speed of the fingers, the way a Flutter list's
+/// drag does, and reports it when they leave the pad: the embedder's stream
+/// ends there, and the page carries the motion on from that speed.
 class ScrollRelaySink {
-  ScrollRelaySink(this.onScroll);
+  ScrollRelaySink(this.onScroll, {this.onEnd});
 
   /// Receives the accumulated delta in wheel sign convention (positive [dy]
   /// scrolls the content down) and the cursor position of the latest event.
   final void Function(double dx, double dy, Offset position) onScroll;
 
+  /// Receives the fingers' speed at lift-off in wheel sign convention,
+  /// logical pixels per second, after the last delta of the pan went out.
+  final void Function(Offset velocity)? onEnd;
+
   double _pendingDx = 0;
   double _pendingDy = 0;
   Offset _position = Offset.zero;
+  Offset? _endVelocity;
+  VelocityTracker? _tracker;
   bool _flushScheduled = false;
   bool _disposed = false;
 
@@ -33,17 +43,27 @@ class ScrollRelaySink {
 
   void start(PointerPanZoomStartEvent event) {
     _position = event.localPosition;
+    _tracker = VelocityTracker.withKind(PointerDeviceKind.trackpad)
+      ..addPosition(event.timeStamp, Offset.zero);
   }
 
   void update(PointerPanZoomUpdateEvent event) {
+    // `pan` is the fingers' travel since the start: what the speed is read
+    // off, as ScrollableState reads it off a drag.
+    _tracker?.addPosition(event.timeStamp, event.pan);
     // `panDelta` is finger movement; a wheel delta points the other way
     // (fingers moving up scroll the content down).
     add(-event.panDelta.dx, -event.panDelta.dy, event.localPosition);
   }
 
   void end(PointerPanZoomEndEvent event) {
-    // Flush whatever the last frame did not carry so a short flick is not
-    // silently dropped.
+    // Fingers moving up fling the content down: the same sign flip as the
+    // deltas. Reported from the flush, after whatever the last frame did not
+    // carry, so a short flick is neither dropped nor overtaken by its own
+    // glide.
+    final velocity = _tracker?.getVelocity().pixelsPerSecond ?? Offset.zero;
+    _tracker = null;
+    _endVelocity = -velocity;
     _scheduleFlush();
   }
 
@@ -73,10 +93,13 @@ class ScrollRelaySink {
   void flush() {
     final dx = _pendingDx;
     final dy = _pendingDy;
+    final velocity = _endVelocity;
     _pendingDx = 0;
     _pendingDy = 0;
-    if (_disposed || (dx == 0 && dy == 0)) return;
-    onScroll(dx, dy, _position);
+    _endVelocity = null;
+    if (_disposed) return;
+    if (dx != 0 || dy != 0) onScroll(dx, dy, _position);
+    if (velocity != null) onEnd?.call(velocity);
   }
 }
 
@@ -108,12 +131,15 @@ Offset cssPixelsForWheel(Offset scrollDelta, double devicePixelRatio) =>
 ///   that crawled a line at a time, with no animation.
 ///
 /// This wrapper captures both and replays them in the page through the
-/// bridge: a pan as `trackpadScroll()`, applied as it comes so the content
-/// tracks the finger; a notch as `wheelScroll()`, converted back to the CSS
-/// pixels a browser would scroll ([cssPixelsForWheel]) and animated there over
-/// the frames that follow. Once the page is up it is told
-/// (`relayNativeWheel`) to drop the plugin's copy of the wheel, or every notch
-/// would scroll twice.
+/// bridge: a pan as `trackpadScroll()`, a frame's worth at a time, with the
+/// fingers' speed at lift-off (`trackpadScrollEnd()`) so the page can carry
+/// the motion on the way a Flutter list does — the embedder's stream carries
+/// the pad's sample jitter and stops dead when the fingers leave, and the
+/// page is what evens it out and glides; a notch as `wheelScroll()`,
+/// converted back to the CSS pixels a browser would scroll
+/// ([cssPixelsForWheel]) and animated there over the frames that follow. Once
+/// the page is up it is told (`relayNativeWheel`) to drop the plugin's copy of
+/// the wheel, or every notch would scroll twice.
 ///
 /// On every other platform the child is returned untouched: Android/iOS scroll
 /// by touch, and macOS hosts a real native WKWebView that handles its own
@@ -139,7 +165,10 @@ class ChatWebViewScrollRelay extends ConsumerStatefulWidget {
 
 class _ChatWebViewScrollRelayState
     extends ConsumerState<ChatWebViewScrollRelay> {
-  late final ScrollRelaySink _pans = ScrollRelaySink(_sendPan);
+  late final ScrollRelaySink _pans = ScrollRelaySink(
+    _sendPan,
+    onEnd: _sendPanEnd,
+  );
   late final ScrollRelaySink _notches = ScrollRelaySink(_sendWheel);
   double _devicePixelRatio = 1;
   ChatBridgeController? _relayingWheelFor;
@@ -158,6 +187,26 @@ class _ChatWebViewScrollRelayState
     );
   }
 
+  /// Fingers on the pad: whatever the page still glides from the last flick
+  /// stops. Also what a touch during a glide reports, as a scroll-inertia
+  /// cancel signal rather than a pan.
+  void _sendPanStart() {
+    final bridge = _bridge;
+    if (bridge == null) return;
+    unawaited(bridge.trackpadScrollStart());
+  }
+
+  void _sendPanEnd(Offset velocity) {
+    final bridge = _bridge;
+    if (bridge == null) return;
+    unawaited(bridge.trackpadScrollEnd(vx: velocity.dx, vy: velocity.dy));
+  }
+
+  void _onPanStart(PointerPanZoomStartEvent event) {
+    _pans.start(event);
+    _sendPanStart();
+  }
+
   void _sendWheel(double dx, double dy, Offset position) {
     final bridge = _bridge;
     if (bridge == null) return;
@@ -167,6 +216,10 @@ class _ChatWebViewScrollRelayState
   }
 
   void _onPointerSignal(PointerSignalEvent event) {
+    if (event is PointerScrollInertiaCancelEvent) {
+      _sendPanStart();
+      return;
+    }
     if (event is! PointerScrollEvent) return;
     final delta = cssPixelsForWheel(event.scrollDelta, _devicePixelRatio);
     _notches.add(delta.dx, delta.dy, event.localPosition);
@@ -205,7 +258,7 @@ class _ChatWebViewScrollRelayState
       // only *adds* this render object to the result — children are still hit
       // first, so the WebView keeps receiving every event it does today.
       behavior: HitTestBehavior.opaque,
-      onPointerPanZoomStart: _pans.start,
+      onPointerPanZoomStart: _onPanStart,
       onPointerPanZoomUpdate: _pans.update,
       onPointerPanZoomEnd: _pans.end,
       onPointerSignal: _onPointerSignal,

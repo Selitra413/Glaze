@@ -6,7 +6,11 @@
  *   embedder reports its scrolling as pan/zoom pointer events
  *   (PointerPanZoomStart/Update/End), and flutter_inappwebview_windows forwards
  *   only PointerScrollEvent to WebView2 (flutter_inappwebview #2503 / #2511,
- *   both closed as not planned).
+ *   both closed as not planned). What the embedder does report is one sum per
+ *   frame of the pad's raw samples — jittery, three pixels one frame and ten
+ *   the next under a steady finger — and nothing once the fingers leave: the
+ *   glide a flick has everywhere else is the framework's own doing in a
+ *   Flutter list, and the page has no framework.
  * - A mouse wheel does arrive, but shrunk. The plugin hands WebView2 Flutter's
  *   scroll delta — logical pixels, already divided by the device pixel ratio —
  *   as if it were wheel units (120 per notch), so one notch lands as a fraction
@@ -14,14 +18,15 @@
  *   two. The page then moved by that fraction, in a single jump.
  *
  * ChatWebViewScrollRelay on the Flutter side captures both and hands them to
- * the Bridge, which lands them here: scrollBy() for a pan, wheel() for a notch
- * already converted back to the CSS pixels a browser would scroll. Both are
- * replayed as a synthetic `wheel` event at the cursor so every existing wheel
- * handler (the #chat-container handler in ./index.js, the edit textarea
- * handler in ./edit_controller.js) reacts exactly as it does to a real wheel —
- * one scroll path, not three. A pan is applied as it comes, so the content
- * tracks the finger; a notch is spread over the frames that follow, the way a
- * browser animates a wheel.
+ * the Bridge, which lands them here: pan()/panStart()/panEnd() for the
+ * touchpad, wheel() for a notch already converted back to the CSS pixels a
+ * browser would scroll. Every step is replayed as a synthetic `wheel` event at
+ * the cursor so the existing wheel handlers (the #chat-container handler in
+ * ./index.js, the edit textarea handler in ./edit_controller.js) react exactly
+ * as they do to a real wheel — one scroll path, not three. A pan is evened out
+ * over a frame or two so the content follows the finger without the jitter,
+ * and carried on from the speed the fingers left at; a notch is spread over
+ * the frames that follow, the way a browser animates a wheel.
  *
  * While the wheel is relayed, the trusted `wheel` the plugin still forwards for
  * the same notch is swallowed at the document — see relayNativeWheel() — or
@@ -44,6 +49,22 @@ export const WHEEL_PIXEL_SCALE = 1;
  * left rather than queue behind it, so a fast spin stays fast. */
 export const WHEEL_SMOOTHING_MS = 70;
 
+/* The same filter for a touchpad pan, with a τ short enough that the content
+ * sits only a frame or two behind the finger: a steady finger whose frames
+ * come in as 3, 10, 5, 5, 7 px comes out at a near-even 5, and the lag is
+ * what a browser's own input resampling costs. */
+export const PAN_SMOOTHING_MS = 40;
+
+/* After the fingers leave the pad the content keeps the speed they had and
+ * loses 1 − e^(−dt/τ) of it per frame with τ = this many milliseconds, so a
+ * hard flick glides for about two seconds — the same shape Flutter's own
+ * lists give a flick. The speed is capped and small ones are not a flick at
+ * all, as in ScrollPhysics (8000 and 50 px/s). */
+export const FLING_DECAY_MS = 350;
+export const FLING_MAX_PX_PER_MS = 8;
+export const FLING_MIN_PX_PER_MS = 0.05;
+const FLING_STOP_PX_PER_MS = 0.01;
+
 const SCROLLABLE_OVERFLOW = /^(auto|scroll|overlay)$/;
 
 function prefersReducedMotion() {
@@ -55,10 +76,19 @@ export class ScrollRelay {
   /** @param containerFn returns the chat scroll container (may be null early). */
   constructor(containerFn) {
     this._containerFn = containerFn;
-    // What the wheel still has to scroll, in CSS pixels, and where the cursor
-    // was when the last notch came in.
-    this._pendingX = 0;
-    this._pendingY = 0;
+    // What is still owed, in CSS pixels: wheel notches and pans apart, since
+    // they close in at different rates.
+    this._owedWheelX = 0;
+    this._owedWheelY = 0;
+    this._owedPanX = 0;
+    this._owedPanY = 0;
+    // A flick in flight: speed in CSS pixels per millisecond, and what of it
+    // did not fill a whole device pixel last frame.
+    this._flingVX = 0;
+    this._flingVY = 0;
+    this._flingCarryX = 0;
+    this._flingCarryY = 0;
+    // Where the cursor was when the last input came in.
     this._cursorX = NaN;
     this._cursorY = NaN;
     this._frameId = 0;
@@ -135,29 +165,96 @@ export class ScrollRelay {
     dx = Number(dx) || 0;
     dy = Number(dy) || 0;
     if (dx === 0 && dy === 0) return;
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      this._cursorX = x;
-      this._cursorY = y;
-    }
+    this._moveCursor(x, y);
+    // The wheel takes over from a flick.
+    this._stopFling();
     if (prefersReducedMotion()) {
       this.scrollBy(dx, dy, this._cursorX, this._cursorY);
       return;
     }
     // A notch the other way starts over: what the last one had left would
     // only pull against it.
-    if (dx * this._pendingX < 0) this._pendingX = 0;
-    if (dy * this._pendingY < 0) this._pendingY = 0;
-    this._pendingX += dx;
-    this._pendingY += dy;
-    if (!this._frameId) {
-      this._frameAt = 0;
-      this._frameId = requestAnimationFrame(this._frame);
+    if (dx * this._owedWheelX < 0) this._owedWheelX = 0;
+    if (dy * this._owedWheelY < 0) this._owedWheelY = 0;
+    this._owedWheelX += dx;
+    this._owedWheelY += dy;
+    this._wake();
+  }
+
+  /* A frame's worth of touchpad pan, (dx, dy) CSS pixels in wheel sign
+   * convention, followed a frame or two behind. */
+  pan(dx, dy, x, y) {
+    dx = Number(dx) || 0;
+    dy = Number(dy) || 0;
+    if (dx === 0 && dy === 0) return;
+    this._moveCursor(x, y);
+    // Fingers on the pad are in charge; nothing glides under them.
+    this._stopFling();
+    if (prefersReducedMotion()) {
+      this.scrollBy(dx, dy, this._cursorX, this._cursorY);
+      return;
+    }
+    if (dx * this._owedPanX < 0) this._owedPanX = 0;
+    if (dy * this._owedPanY < 0) this._owedPanY = 0;
+    this._owedPanX += dx;
+    this._owedPanY += dy;
+    this._wake();
+  }
+
+  /* The fingers touched the pad: whatever still glides from the last flick
+   * stops where it is, as a touch stops a Flutter list. */
+  panStart() {
+    this._stopFling();
+  }
+
+  /* The fingers left the pad at (vx, vy) CSS pixels per second, wheel sign
+   * convention: carry the motion on and let it die away. */
+  panEnd(vx, vy) {
+    vx = (Number(vx) || 0) / 1000;
+    vy = (Number(vy) || 0) / 1000;
+    if (prefersReducedMotion()) return;
+    const clamp = (v) => Math.sign(v) * Math.min(Math.abs(v), FLING_MAX_PX_PER_MS);
+    vx = Math.abs(vx) < FLING_MIN_PX_PER_MS ? 0 : clamp(vx);
+    vy = Math.abs(vy) < FLING_MIN_PX_PER_MS ? 0 : clamp(vy);
+    if (vx === 0 && vy === 0) return;
+    this._flingVX = vx;
+    this._flingVY = vy;
+    this._flingCarryX = 0;
+    this._flingCarryY = 0;
+    this._wake();
+  }
+
+  /* What is still owed and in flight, for tests. */
+  get pendingWheel() {
+    return { dx: this._owedWheelX, dy: this._owedWheelY };
+  }
+
+  get pendingPan() {
+    return { dx: this._owedPanX, dy: this._owedPanY };
+  }
+
+  get flingVelocity() {
+    return { vx: this._flingVX, vy: this._flingVY };
+  }
+
+  _moveCursor(x, y) {
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      this._cursorX = x;
+      this._cursorY = y;
     }
   }
 
-  /* What the wheel still owes, for tests. */
-  get pendingWheel() {
-    return { dx: this._pendingX, dy: this._pendingY };
+  _stopFling() {
+    this._flingVX = 0;
+    this._flingVY = 0;
+    this._flingCarryX = 0;
+    this._flingCarryY = 0;
+  }
+
+  _wake() {
+    if (this._frameId) return;
+    this._frameAt = 0;
+    this._frameId = requestAnimationFrame(this._frame);
   }
 
   _frame(now) {
@@ -166,27 +263,63 @@ export class ScrollRelay {
     // whole wait, or the chat would leap when it is shown again.
     const dt = this._frameAt ? Math.min(now - this._frameAt, 100) : 16;
     this._frameAt = now;
-    const share = 1 - Math.exp(-dt / WHEEL_SMOOTHING_MS);
     const grain = 1 / (window.devicePixelRatio || 1);
-    let stepX = this._stepOf(this._pendingX, share, grain);
-    let stepY = this._stepOf(this._pendingY, share, grain);
+    const wheelShare = 1 - Math.exp(-dt / WHEEL_SMOOTHING_MS);
+    const panShare = 1 - Math.exp(-dt / PAN_SMOOTHING_MS);
+    const flingDecay = Math.exp(-dt / FLING_DECAY_MS);
+
+    const wheelX = this._stepOf(this._owedWheelX, wheelShare, grain);
+    const wheelY = this._stepOf(this._owedWheelY, wheelShare, grain);
+    const panX = this._stepOf(this._owedPanX, panShare, grain);
+    const panY = this._stepOf(this._owedPanY, panShare, grain);
+    this._flingCarryX += this._flingVX * dt;
+    this._flingCarryY += this._flingVY * dt;
+    const flingX = Math.round(this._flingCarryX / grain) * grain;
+    const flingY = Math.round(this._flingCarryY / grain) * grain;
+    this._flingCarryX -= flingX;
+    this._flingCarryY -= flingY;
+    this._flingVX *= flingDecay;
+    this._flingVY *= flingDecay;
+    if (Math.abs(this._flingVX) < FLING_STOP_PX_PER_MS) {
+      this._flingVX = 0;
+      this._flingCarryX = 0;
+    }
+    if (Math.abs(this._flingVY) < FLING_STOP_PX_PER_MS) {
+      this._flingVY = 0;
+      this._flingCarryY = 0;
+    }
+
+    let stepX = wheelX + panX + flingX;
+    let stepY = wheelY + panY + flingY;
     // At an edge, what cannot scroll is dropped rather than saved up: a notch
-    // past the end of the chat must not come back as movement the moment the
-    // wheel turns the other way.
+    // or a flick past the end of the chat must not come back as movement the
+    // moment the input turns the other way.
     if (stepX !== 0 && !this._canScrollAt(stepX, 0)) {
-      this._pendingX = 0;
+      this._owedWheelX = 0;
+      this._owedPanX = 0;
+      this._flingVX = 0;
+      this._flingCarryX = 0;
       stepX = 0;
+    } else {
+      this._owedWheelX -= wheelX;
+      this._owedPanX -= panX;
     }
     if (stepY !== 0 && !this._canScrollAt(0, stepY)) {
-      this._pendingY = 0;
+      this._owedWheelY = 0;
+      this._owedPanY = 0;
+      this._flingVY = 0;
+      this._flingCarryY = 0;
       stepY = 0;
+    } else {
+      this._owedWheelY -= wheelY;
+      this._owedPanY -= panY;
     }
-    this._pendingX -= stepX;
-    this._pendingY -= stepY;
     if (stepX !== 0 || stepY !== 0) {
       this.scrollBy(stepX, stepY, this._cursorX, this._cursorY);
     }
-    if (this._pendingX !== 0 || this._pendingY !== 0) {
+    if (this._owedWheelX !== 0 || this._owedWheelY !== 0 ||
+        this._owedPanX !== 0 || this._owedPanY !== 0 ||
+        this._flingVX !== 0 || this._flingVY !== 0) {
       this._frameId = requestAnimationFrame(this._frame);
     }
   }

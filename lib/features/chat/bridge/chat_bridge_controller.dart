@@ -992,6 +992,9 @@ class ChatBridgeController {
     required double x,
     required double y,
   }) => layout.trackpadScroll(dx: dx, dy: dy, x: x, y: y);
+  Future<void> trackpadScrollStart() => layout.trackpadScrollStart();
+  Future<void> trackpadScrollEnd({required double vx, required double vy}) =>
+      layout.trackpadScrollEnd(vx: vx, vy: vy);
   Future<void> wheelScroll({
     required double dx,
     required double dy,
