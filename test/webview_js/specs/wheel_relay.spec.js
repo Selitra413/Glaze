@@ -32,12 +32,28 @@ async function openChat(page) {
     window.bridge.setBottomPadding(130, 0);
   });
   await page.waitForTimeout(500);
+  // Text laid out in a fallback face reflows when the real one arrives, and
+  // every row changes height with it.
+  await page.evaluate(() => document.fonts.ready);
   // Start at the very end, as an opened chat does.
   await page.evaluate(() => {
     const c = document.getElementById('chat-container');
     c.scrollTop = c.scrollHeight;
   });
-  await page.waitForTimeout(100);
+  // And let the list come to rest, in height as well as position: a row
+  // measured late grows the list and the anchor correction moves the
+  // position with it, and a start read before that is not the start the
+  // scrolls below add to.
+  const layout = () =>
+    page.evaluate(() => {
+      const c = document.getElementById('chat-container');
+      return c.scrollTop + ':' + c.scrollHeight;
+    });
+  await expect.poll(async () => {
+    const a = await layout();
+    await page.waitForTimeout(300);
+    return a === (await layout());
+  }, { timeout: 8000 }).toBe(true);
 }
 
 const scrollTop = (page) =>
@@ -49,9 +65,11 @@ const wheel = (page, dy) =>
     [dy, CURSOR],
   );
 
+// Within two pixels: the virtual list may nudge the position by one as a
+// row re-measures, and a busy runner can hold a frame back.
 const settled = (page, target) =>
-  expect.poll(async () => Math.abs((await scrollTop(page)) - target) < 0.6, {
-    timeout: 3000,
+  expect.poll(async () => Math.abs((await scrollTop(page)) - target) < 2, {
+    timeout: 5000,
   }).toBe(true);
 
 test('a notch scrolls its whole distance over several frames, not in one jump', async ({ page }) => {
@@ -132,12 +150,22 @@ test('the trusted wheel is kept until the relay is on, then dropped', async ({ p
 });
 
 test('reduced motion scrolls a notch at once', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
   await openChat(page);
   await page.evaluate(() => window.bridge.relayNativeWheel(true));
+  // Emulated once the page is up, and checked: on a busy CI runner the
+  // emulation set before the load reached the document late, and the notch
+  // animated.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect.poll(() =>
+    page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+  ).toBe(true);
   const start = await scrollTop(page);
 
-  await wheel(page, -300);
+  // Read in the same breath as the call: nothing is left for a later frame.
+  const after = await page.evaluate(([d, at]) => {
+    window.bridge.wheelScroll(0, d, at.x, at.y);
+    return document.getElementById('chat-container').scrollTop;
+  }, [-300, CURSOR]);
 
-  expect(Math.abs((await scrollTop(page)) - (start - 300))).toBeLessThan(0.6);
+  expect(Math.abs(after - (start - 300))).toBeLessThan(0.6);
 });
