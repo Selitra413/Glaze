@@ -469,79 +469,76 @@ class _MenuItemState extends State<MenuItem> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) {
-          setState(() => _pressed = false);
-          Haptics.selectionClick();
-          widget.onTap();
-        },
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          color: _pressed
-              ? context.cs.primary.withValues(alpha: 0.08)
-              : Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-          child: Row(
-            children: [
-              if (widget.iconWidget != null)
-                SizedBox(width: 22, height: 22, child: widget.iconWidget)
-              else if (widget.icon != null)
-                Icon(widget.icon, size: 22, color: const Color(0xFF99A2AD)),
-              if (widget.icon != null || widget.iconWidget != null)
-                const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        Haptics.selectionClick();
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        color: _pressed
+            ? context.cs.primary.withValues(alpha: 0.08)
+            : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            if (widget.iconWidget != null)
+              SizedBox(width: 22, height: 22, child: widget.iconWidget)
+            else if (widget.icon != null)
+              Icon(widget.icon, size: 22, color: const Color(0xFF99A2AD)),
+            if (widget.icon != null || widget.iconWidget != null)
+              const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: context.cs.onSurfaceVariant,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                  if (widget.badge != null) ...[
+                    const SizedBox(height: 4),
+                    widget.badge!,
+                  ],
+                  if (widget.subtitle != null &&
+                      widget.subtitle!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
                     Text(
-                      widget.label,
+                      widget.subtitle!,
                       style: TextStyle(
-                        color: context.cs.onSurfaceVariant,
-                        fontSize: 16,
+                        color: context.cs.onSurfaceVariant.withValues(
+                          alpha: 0.45,
+                        ),
+                        fontSize: 12,
                         fontWeight: FontWeight.w400,
                       ),
                     ),
-                    if (widget.badge != null) ...[
-                      const SizedBox(height: 4),
-                      widget.badge!,
-                    ],
-                    if (widget.subtitle != null &&
-                        widget.subtitle!.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.subtitle!,
-                        style: TextStyle(
-                          color: context.cs.onSurfaceVariant.withValues(
-                            alpha: 0.45,
-                          ),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ],
                   ],
+                ],
+              ),
+            ),
+            if (widget.value != null)
+              Text(
+                widget.value!,
+                style: TextStyle(
+                  color: context.cs.onSurfaceVariant,
+                  fontSize: 14,
                 ),
               ),
-              if (widget.value != null)
-                Text(
-                  widget.value!,
-                  style: TextStyle(
-                    color: context.cs.onSurfaceVariant,
-                    fontSize: 14,
-                  ),
-                ),
-              if (widget.trailing != null) widget.trailing!,
-              if (widget.value != null || widget.trailing != null)
-                const SizedBox(width: 4),
-            ],
-          ),
+            if (widget.trailing != null) widget.trailing!,
+            if (widget.value != null || widget.trailing != null)
+              const SizedBox(width: 4),
+          ],
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1149,101 +1146,91 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) {
-          setState(() => _pressed = false);
-          Haptics.selectionClick();
-          widget.onTap();
-        },
-        onTapCancel: () => setState(() => _pressed = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          color: _pressed
-              ? context.cs.primary.withValues(alpha: 0.08)
-              : Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        Haptics.selectionClick();
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        color: _pressed
+            ? context.cs.primary.withValues(alpha: 0.08)
+            : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.name,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w400,
+                      color: widget.enabled
+                          ? context.cs.onSurfaceVariant
+                          : context.cs.onSurfaceVariant.withValues(alpha: 0.4),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (widget.subtitle != null &&
+                      widget.subtitle!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
                     Text(
-                      widget.name,
+                      widget.subtitle!,
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w400,
-                        color: widget.enabled
-                            ? context.cs.onSurfaceVariant
-                            : context.cs.onSurfaceVariant.withValues(
-                                alpha: 0.4,
-                              ),
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant.withValues(
+                          alpha: 0.45,
+                        ),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (widget.subtitle != null &&
-                        widget.subtitle!.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.subtitle!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.cs.onSurfaceVariant.withValues(
-                            alpha: 0.45,
-                          ),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
                   ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Switch(
+              value: widget.enabled,
+              onChanged: (v) {
+                Haptics.selectionClick();
+                widget.onToggle(v);
+              },
+              activeThumbColor: context.cs.primary,
+              activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
+              trackOutlineColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.selected)
+                    ? Colors.transparent
+                    : context.cs.outlineVariant,
+              ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                Haptics.selectionClick();
+                widget.onMore();
+              },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
+                child: Icon(
+                  Icons.more_vert,
+                  size: 20,
+                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.45),
                 ),
               ),
-              const SizedBox(width: 8),
-              Switch(
-                value: widget.enabled,
-                onChanged: (v) {
-                  Haptics.selectionClick();
-                  widget.onToggle(v);
-                },
-                activeThumbColor: context.cs.primary,
-                activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
-                trackOutlineColor: WidgetStateProperty.resolveWith(
-                  (states) => states.contains(WidgetState.selected)
-                      ? Colors.transparent
-                      : context.cs.outlineVariant,
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    Haptics.selectionClick();
-                    widget.onMore();
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
-                    child: Icon(
-                      Icons.more_vert,
-                      size: 20,
-                      color: context.cs.onSurfaceVariant.withValues(
-                        alpha: 0.45,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            )),
+          ],
         ),
       ),
-    );
+    ));
   }
 }
 

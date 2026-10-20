@@ -544,14 +544,13 @@ class JanitorRefusedException implements Exception {
   /// JanitorAI's own, so it reads identically whether it was predicted here or
   /// read off a real 403.
   const JanitorRefusedException.proxyForbidden()
-    : status = 403,
-      message = 'Proxies are forbidden for this character';
+      : status = 403,
+        message = 'Proxies are forbidden for this character';
 
   bool get isProxyForbidden => message.toLowerCase().contains('prox');
 
   @override
-  String toString() =>
-      message.isEmpty ? 'generateAlpha failed ($status)' : message;
+  String toString() => message.isEmpty ? 'generateAlpha failed ($status)' : message;
 }
 
 /// Persistent offscreen WebView that runs janitorai.com API requests from
@@ -613,10 +612,8 @@ class JanitorWebViewProxy {
   static String _randomString(int len) {
     const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
     final rand = Random();
-    return List.generate(
-      len,
-      (_) => alphabet[rand.nextInt(alphabet.length)],
-    ).join();
+    return List.generate(len, (_) => alphabet[rand.nextInt(alphabet.length)])
+        .join();
   }
 
   /// RFC-4122 v4 UUID — the Dart equivalent of JAR's `crypto.randomUUID()`,
@@ -759,15 +756,16 @@ class JanitorWebViewProxy {
     bool includeCard = true,
     JanitorLoreBudget? loreBudget,
     void Function(String phase)? onPhase,
-  }) => _enqueue(
-    () => _captureLocked(
-      characterId,
-      triggerText,
-      includeCard,
-      loreBudget,
-      onPhase,
-    ),
-  );
+  }) =>
+      _enqueue(
+        () => _captureLocked(
+          characterId,
+          triggerText,
+          includeCard,
+          loreBudget,
+          onPhase,
+        ),
+      );
 
   /// Most follow-up passes one capture runs after hitting the lorebook cap.
   /// Each is a chat of its own, the better part of a minute; past this many the
@@ -791,9 +789,7 @@ class JanitorWebViewProxy {
     await _ensureStarted();
 
     if (!await isLoggedIn()) {
-      throw Exception(
-        'Not logged into JanitorAI — log in first (Menu → JanitorAI).',
-      );
+      throw Exception('Not logged into JanitorAI — log in first (Menu → JanitorAI).');
     }
     // The capture spends the session across a dozen account calls and cannot
     // retry from the middle, so it starts on a token that is known good.
@@ -831,14 +827,11 @@ class JanitorWebViewProxy {
       // run that can never occur in genuine card text, and JanitorAI may bake the
       // profile name in even with a persona bound. Without a seed, only the
       // persona-less path needs the account's own name swapped.
-      bakedUserName =
-          seeded.sentinel ??
+      bakedUserName = seeded.sentinel ??
           (personaId == null ? await _activePersonaName() : null);
       if (personaId == null) {
-        _log(
-          'no {{user}} persona — baked name fallback: '
-          '${bakedUserName ?? 'unknown'}',
-        );
+        _log('no {{user}} persona — baked name fallback: '
+            '${bakedUserName ?? 'unknown'}');
       }
 
       final controller = _controller;
@@ -889,11 +882,9 @@ class JanitorWebViewProxy {
           final refusal = full.refusal ?? dot.refusal;
           if (refusal != null) throw _refusalError(characterId, refusal);
           // Prefer the concrete reason the send failed over a bare timeout.
-          throw Exception(
-            full.problem ??
-                dot.problem ??
-                'Timed out waiting for a generateAlpha capture.',
-          );
+          throw Exception(full.problem ??
+              dot.problem ??
+              'Timed out waiting for a generateAlpha capture.');
         }
 
         // 5) The lore that came back hit JanitorAI's cap: entries the trigger
@@ -963,10 +954,8 @@ class JanitorWebViewProxy {
     required void Function(String) phase,
   }) async {
     final firstTokens = budget.loreTokens(first, probe: probe);
-    _log(
-      'lore ${firstTokens}t of $janitorLoreTokenCap'
-      '${budget.exact ? '' : ' (estimated)'}',
-    );
+    _log('lore ${firstTokens}t of $janitorLoreTokenCap'
+        '${budget.exact ? '' : ' (estimated)'}');
     if (!budget.isSaturated(first, probe: probe)) return const [];
     if (probe != null && budget.isSaturated(probe)) {
       _log('the "." probe alone fills the lorebook cap — not splitting');
@@ -1028,7 +1017,10 @@ class JanitorWebViewProxy {
     final chatBody = await _fetchLocked(
       'https://janitorai.com/hampter/chats',
       method: 'POST',
-      body: jsonEncode({'character_id': characterId, 'persona_id': ?personaId}),
+      body: jsonEncode({
+        'character_id': characterId,
+        'persona_id': ?personaId,
+      }),
     );
     final chatJson = jsonDecode(chatBody);
     final chatId = (chatJson is Map ? chatJson['id'] : null)?.toString();
@@ -1081,8 +1073,7 @@ class JanitorWebViewProxy {
     while (DateTime.now().isBefore(deadline)) {
       try {
         final res = await controller.evaluateJavascript(
-          source:
-              'window.__glazeComposerReady ? '
+          source: 'window.__glazeComposerReady ? '
               '!!window.__glazeComposerReady() : false',
         );
         if (res == true) return true;
@@ -1128,10 +1119,10 @@ class JanitorWebViewProxy {
       final list = parsed is List
           ? parsed
           : (parsed is Map && parsed['personas'] is List)
-          ? parsed['personas'] as List
-          : (parsed is Map && parsed['data'] is List)
-          ? parsed['data'] as List
-          : const <dynamic>[];
+              ? parsed['personas'] as List
+              : (parsed is Map && parsed['data'] is List)
+                  ? parsed['data'] as List
+                  : const <dynamic>[];
       for (final p in list) {
         if (p is Map && p['name'] == _userMacroName && p['id'] != null) {
           _log('reusing {{user}} persona ${p['id']}');
@@ -1157,9 +1148,8 @@ class JanitorWebViewProxy {
         }),
       );
       final parsed = jsonDecode(body);
-      final id =
-          (parsed is Map ? (parsed['id'] ?? parsed['data']?['id']) : null)
-              ?.toString();
+      final id = (parsed is Map ? (parsed['id'] ?? parsed['data']?['id']) : null)
+          ?.toString();
       if (id != null && id.isNotEmpty) {
         _log('created {{user}} persona $id');
         return id;
@@ -1188,17 +1178,14 @@ class JanitorWebViewProxy {
   /// a random hex run, so swapping it back to `{{user}}` afterwards can never
   /// hit genuine card text.
   Future<({Map<String, dynamic>? snapshot, String? sentinel})>
-  _seedProfileName() async {
+      _seedProfileName() async {
     try {
       final body = await _fetchLocked(_profileUrl);
       final parsed = jsonDecode(body);
       if (parsed is! Map) return (snapshot: null, sentinel: null);
-      final priorName = (parsed['name'] is String)
-          ? parsed['name'] as String
-          : '';
-      final priorAppearance = (parsed['profile'] is String)
-          ? parsed['profile'] as String
-          : '';
+      final priorName = (parsed['name'] is String) ? parsed['name'] as String : '';
+      final priorAppearance =
+          (parsed['profile'] is String) ? parsed['profile'] as String : '';
       if (priorName.trim().isNotEmpty) return (snapshot: null, sentinel: null);
 
       final sentinel = _randomString(24).toUpperCase();
@@ -1259,14 +1246,13 @@ class JanitorWebViewProxy {
   /// Index 0 is the primary greeting. Empty on any failure.
   Future<List<String>> _fetchChatGreetings(String chatId) async {
     try {
-      final body = await _fetchLocked(
-        'https://janitorai.com/hampter/chats/$chatId',
-      );
+      final body =
+          await _fetchLocked('https://janitorai.com/hampter/chats/$chatId');
       final parsed = jsonDecode(body);
       if (parsed is! Map) return const [];
       final nested = parsed['data'];
-      final character =
-          parsed['character'] ?? (nested is Map ? nested['character'] : null);
+      final character = parsed['character'] ??
+          (nested is Map ? nested['character'] : null);
       if (character is! Map) return const [];
 
       final out = <String>[];
@@ -1274,7 +1260,7 @@ class JanitorWebViewProxy {
         final text = g is String
             ? g
             : (g is Map ? (g['first_message'] ?? g['message'] ?? '') : '')
-                  .toString();
+                .toString();
         final trimmed = text.trim();
         // JanitorAI pads the array with nulls and invisible-character
         // placeholders that would import as blank greetings.
@@ -1333,11 +1319,8 @@ class JanitorWebViewProxy {
       // Create the throwaway preset, then re-read to resolve the server-assigned
       // id (the POST body only carries our client_id).
       final dummy = _buildDummyPreset();
-      await _fetchLocked(
-        _proxyConfigsUrl,
-        method: 'POST',
-        body: jsonEncode(dummy),
-      );
+      await _fetchLocked(_proxyConfigsUrl,
+          method: 'POST', body: jsonEncode(dummy));
       final after = jsonDecode(await _fetchLocked(_apiSettingsUrl));
       final configs = (after is Map && after['proxy_configs'] is List)
           ? (after['proxy_configs'] as List)
@@ -1369,10 +1352,8 @@ class JanitorWebViewProxy {
         _log('could not force context_length 0: $e');
       }
 
-      _log(
-        'extraction mode on (dummy proxy $dummyServerId selected, '
-        'context_length 0)',
-      );
+      _log('extraction mode on (dummy proxy $dummyServerId selected, '
+          'context_length 0)');
       return {
         'selectedProxyConfigId': originalSelectedId,
         'source': originalSource,
@@ -1410,9 +1391,8 @@ class JanitorWebViewProxy {
     final originalGen = snapshot['generationSettings'];
 
     final patch = <String, dynamic>{
-      'selected_proxy_config_id': hadOwnPresets
-          ? snapshot['selectedProxyConfigId']
-          : null,
+      'selected_proxy_config_id':
+          hadOwnPresets ? snapshot['selectedProxyConfigId'] : null,
     };
     if (!hadOwnPresets) {
       patch['source'] = 'janitor'; // JLLM
@@ -1424,15 +1404,11 @@ class JanitorWebViewProxy {
       patch['generation_settings'] = originalGen;
     } else {
       patch['generation_settings'] = {
-        ...?(originalGen is Map
-            ? Map<String, dynamic>.from(originalGen)
-            : null),
+        ...?(originalGen is Map ? Map<String, dynamic>.from(originalGen) : null),
         'context_length': _defaultContextLength,
       };
-      _log(
-        'no original context_length — restoring the '
-        '$_defaultContextLength default',
-      );
+      _log('no original context_length — restoring the '
+          '$_defaultContextLength default');
     }
     try {
       await _patchApiSettings(patch);
@@ -1447,19 +1423,14 @@ class JanitorWebViewProxy {
         _log('dummy delete failed: $e');
       }
     }
-    _log(
-      'restored api-settings (selection + generation settings, dummy removed)',
-    );
+    _log('restored api-settings (selection + generation settings, dummy removed)');
   }
 
   /// Partial merge-PATCH of the top-level api-settings (selected proxy, source,
   /// generation_settings…).
   Future<void> _patchApiSettings(Map<String, dynamic> patch) async {
-    await _fetchLocked(
-      _apiSettingsUrl,
-      method: 'PATCH',
-      body: jsonEncode(patch),
-    );
+    await _fetchLocked(_apiSettingsUrl,
+        method: 'PATCH', body: jsonEncode(patch));
   }
 
   /// DELETE a proxy preset by its server-assigned id.
@@ -1564,15 +1535,10 @@ class JanitorWebViewProxy {
       if (entry is! Map) continue;
       final status = entry['status'];
       final matched = entry['matched'] == true;
-      final body = (entry['body'] ?? '').toString().replaceAll(
-        RegExp(r'\s+'),
-        ' ',
-      );
-      parts.add(
-        matched
-            ? '$status returned a prompt that arrived too late'
-            : '$status: ${body.isEmpty ? 'empty body' : body}',
-      );
+      final body = (entry['body'] ?? '').toString().replaceAll(RegExp(r'\s+'), ' ');
+      parts.add(matched
+          ? '$status returned a prompt that arrived too late'
+          : '$status: ${body.isEmpty ? 'empty body' : body}');
     }
     return 'JanitorAI answered /generateAlpha with ${parts.join(' | ')}';
   }
@@ -1590,10 +1556,17 @@ class JanitorWebViewProxy {
   /// [refusal] is set when `/generateAlpha` came back with an HTTP error. That
   /// is a final answer, so the poll stops there rather than sitting out the rest
   /// of its timeout waiting for a payload that will never arrive.
-  Future<_SendResult> _captureOneSend(String text, Duration timeout) async {
+  Future<_SendResult> _captureOneSend(
+    String text,
+    Duration timeout,
+  ) async {
     final controller = _controller;
     if (controller == null) {
-      return (payload: null, problem: 'WebView not available.', refusal: null);
+      return (
+        payload: null,
+        problem: 'WebView not available.',
+        refusal: null,
+      );
     }
 
     String? problem;
@@ -1606,12 +1579,10 @@ class JanitorWebViewProxy {
         problem = 'The send script failed: ${res!.error}';
       } else if (value is Map) {
         if (value['ok'] != true) {
-          problem =
-              'Could not reach the chat composer '
+          problem = 'Could not reach the chat composer '
               '(${value['reason'] ?? 'unknown'}).';
         } else if (value['cleared'] == false) {
-          problem =
-              'The message would not send — it stayed in the composer '
+          problem = 'The message would not send — it stayed in the composer '
               '(${value['diag'] ?? 'no detail'}).';
         }
         _log('send sent=${value['sent']} cleared=${value['cleared']}');
@@ -1626,8 +1597,7 @@ class JanitorWebViewProxy {
       await Future<void>.delayed(const Duration(milliseconds: 700));
       try {
         final res = await controller.evaluateJavascript(
-          source:
-              'window.__glazeAlpha ? JSON.stringify(window.__glazeAlpha) : null',
+          source: 'window.__glazeAlpha ? JSON.stringify(window.__glazeAlpha) : null',
         );
         if (res is String && res.isNotEmpty && res != 'null') {
           final decoded = jsonDecode(res);
@@ -1784,8 +1754,7 @@ class JanitorWebViewProxy {
     try {
       final res = await controller
           .callAsyncJavaScript(
-            functionBody:
-                '''
+            functionBody: '''
               $_findTokenJs
               const token = __glazeFindToken();
               if (!token) return null;
@@ -1820,8 +1789,7 @@ class JanitorWebViewProxy {
     if (controller != null) {
       try {
         await controller.evaluateJavascript(
-          source:
-              'try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}',
+          source: 'try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}',
         );
       } catch (_) {}
     }
@@ -1898,14 +1866,12 @@ class JanitorWebViewProxy {
     if (_starting != null) return _starting!.future;
     final c = Completer<void>();
     _starting = c;
-    _start()
-        .then((_) {
-          c.complete();
-        })
-        .catchError((Object e, StackTrace st) {
-          _starting = null;
-          c.completeError(e, st);
-        });
+    _start().then((_) {
+      c.complete();
+    }).catchError((Object e, StackTrace st) {
+      _starting = null;
+      c.completeError(e, st);
+    });
     return c.future;
   }
 
@@ -1932,9 +1898,8 @@ class JanitorWebViewProxy {
       onWebViewCreated: (controller) async {
         _controller = controller;
         try {
-          final ua = await controller.evaluateJavascript(
-            source: 'navigator.userAgent',
-          );
+          final ua =
+              await controller.evaluateJavascript(source: 'navigator.userAgent');
           if (ua is String && ua.isNotEmpty) {
             CfChallengeService.instance.setWebViewUA(ua);
             _log('UA: $ua');
@@ -2028,8 +1993,7 @@ class JanitorWebViewProxy {
       // plugin version).
       final res = await controller
           .callAsyncJavaScript(
-            functionBody:
-                '''
+            functionBody: '''
               $_findTokenJs
               const token = ${anonymous ? 'null' : '__glazeFindToken()'};
               const headers = { "Accept": "application/json, text/plain, */*" };
