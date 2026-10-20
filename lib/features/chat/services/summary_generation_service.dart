@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/memory_book_api_config_resolver.dart';
-import '../../../core/llm/summary_refusal.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
@@ -480,13 +479,9 @@ class SummaryGenerationService {
     if (!committed) throw const SummaryChainException('changed');
   }
 
-  /// The summarizer's answer as the size of the block it makes. A refusal is
-  /// not a summary (`refused`), and text no shorter than its source frees
-  /// nothing (`not_shorter`); neither is written.
+  /// The summarizer's answer as the size of the block it makes. Text no
+  /// shorter than its source frees nothing (`not_shorter`) and is not written.
   static int _acceptedTokens(String text, int sourceTokens) {
-    if (SummaryRefusal.looksLike(text)) {
-      throw const SummaryChainException('refused');
-    }
     final tokens = estimateTokens(text);
     if (tokens >= sourceTokens) {
       throw const SummaryChainException('not_shorter');

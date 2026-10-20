@@ -97,14 +97,11 @@ class ChatSessionService {
     final currentIdx = character?.currentSessionIndex ?? 0;
 
     final directId = '${charId}_$currentIdx';
-    // The cache first, and the cache filled after: opening a chat from the
-    // list used to decode its current session here, then decode it again in
-    // `switchToSession` a moment later — tens of megabytes, twice.
-    final cached = _cache[directId];
-    if (cached != null && cached.characterId == charId) {
-      _touchCacheKey(directId);
-      return cached;
-    }
+    // Read from the database, not the cache: not every write to a session
+    // goes through this service (session vars, agent swipes, a restore), so
+    // a cached copy can be older than the row, and a later full `put` of it
+    // would write the old data back. The read fills the cache, so the
+    // `switchToSession` that follows an open does not decode it again.
     var session = await repo.getById(directId);
     if (session?.characterId == charId) {
       updateCache(session!);

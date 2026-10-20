@@ -79,6 +79,26 @@ function prefersReducedMotion() {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/* The element under (x, y), looking into open shadow roots: message content
+ * renders inside one, and `document.elementFromPoint` stops at its host, so a
+ * wheel listener or scroller inside a message would never see the relay. */
+function deepElementFromPoint(x, y) {
+  let el = document.elementFromPoint(x, y);
+  while (el && el.shadowRoot) {
+    const inner = el.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === el) break;
+    el = inner;
+  }
+  return el;
+}
+
+/* The parent in the flattened tree: out of a shadow root, its host. */
+function composedParent(el) {
+  if (el.parentElement) return el.parentElement;
+  const root = el.getRootNode();
+  return root instanceof ShadowRoot ? root.host : null;
+}
+
 export class ScrollRelay {
   /** @param containerFn returns the chat scroll container (may be null early). */
   constructor(containerFn) {
@@ -144,7 +164,7 @@ export class ScrollRelay {
 
     const container = this._containerFn ? this._containerFn() : null;
     const hasPoint = Number.isFinite(x) && Number.isFinite(y);
-    const target = (hasPoint ? document.elementFromPoint(x, y) : null) || container;
+    const target = (hasPoint ? deepElementFromPoint(x, y) : null) || container;
     if (!target) return;
 
     // dispatchEvent returns false when a listener called preventDefault(),
@@ -231,6 +251,20 @@ export class ScrollRelay {
     this._flingCarryX = 0;
     this._flingCarryY = 0;
     this._wake();
+  }
+
+  /* Drops everything still owed or gliding and the frame that would move it. */
+  stop() {
+    this._owedWheelX = 0;
+    this._owedWheelY = 0;
+    this._owedPanX = 0;
+    this._owedPanY = 0;
+    this._panFedThisFrame = false;
+    this._stopFling();
+    if (this._frameId) {
+      cancelAnimationFrame(this._frameId);
+      this._frameId = 0;
+    }
   }
 
   /* What is still owed and in flight, for tests. */
@@ -350,10 +384,10 @@ export class ScrollRelay {
   _canScrollAt(dx, dy) {
     const container = this._containerFn ? this._containerFn() : null;
     const hasPoint = Number.isFinite(this._cursorX) && Number.isFinite(this._cursorY);
-    let el = hasPoint ? document.elementFromPoint(this._cursorX, this._cursorY) : null;
+    let el = hasPoint ? deepElementFromPoint(this._cursorX, this._cursorY) : null;
     while (el && el !== document.body && el !== document.documentElement) {
       if (this._canScroll(el, dx, dy)) return true;
-      el = el.parentElement;
+      el = composedParent(el);
     }
     return !!container && this._canScroll(container, dx, dy);
   }
@@ -366,7 +400,7 @@ export class ScrollRelay {
         el.scrollTop += dy;
         return;
       }
-      el = el.parentElement;
+      el = composedParent(el);
     }
     if (container) {
       container.scrollLeft += dx;

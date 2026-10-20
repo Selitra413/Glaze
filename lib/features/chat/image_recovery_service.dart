@@ -188,7 +188,9 @@ class ImageRecoveryService {
           : jsonEncode({'error': 'Generation interrupted'});
       return '[IMG:ERROR:$errorJson]';
     });
-    return result;
+    // A finished block matches the patterns but comes back as an equal new
+    // string; hand back the original so callers can tell by `identical`.
+    return result == text ? text : result;
   }
 
   static String replaceFirstImgErrorOrGen(String text, String resultPath) {

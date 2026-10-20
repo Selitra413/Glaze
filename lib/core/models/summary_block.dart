@@ -319,6 +319,17 @@ class SummaryChain {
   static bool isDraftStale(SummaryDraft draft, Map<String, ChatMessage> byId) =>
       fingerprint(draft.messageIds, byId) != draft.sourceHash;
 
+  /// A stale block with a fresh draft waits for the reader: approving the
+  /// draft brings it back, so compaction neither drops it nor retells its
+  /// messages over again meanwhile.
+  static bool awaitsReview(SummaryBlock block, Map<String, ChatMessage> byId) {
+    final draft = block.draft;
+    return draft != null &&
+        !block.archived &&
+        isStale(block, byId) &&
+        !isDraftStale(draft, byId);
+  }
+
   static Map<String, ChatMessage> index(List<ChatMessage> messages) => {
     for (final message in messages) message.id: message,
   };
@@ -481,7 +492,8 @@ class SummaryChain {
   ) => live(blocks, messages).fold(0, (sum, b) => sum + b.tokens);
 
   /// Drops stale active blocks together with the archive they were merged
-  /// from: the archived parts cover the same changed messages.
+  /// from: the archived parts cover the same changed messages. A block that
+  /// [awaitsReview] stays.
   static List<SummaryBlock> withoutStale(
     List<SummaryBlock> blocks,
     List<ChatMessage> messages,
@@ -497,7 +509,11 @@ class SummaryChain {
     }
 
     for (final block in blocks) {
-      if (!block.archived && isStale(block, byId)) drop(block);
+      if (!block.archived &&
+          isStale(block, byId) &&
+          !awaitsReview(block, byId)) {
+        drop(block);
+      }
     }
     if (removed.isEmpty) return blocks;
     return blocks.where((b) => !removed.contains(b.id)).toList();
@@ -523,7 +539,16 @@ class SummaryChain {
       split = i;
     }
 
-    final covered = promptView(blocks, messages).coveredMessageIds;
+    final byId = index(messages);
+    final covered = {
+      ...promptView(blocks, messages).coveredMessageIds,
+      // Messages under a draft waiting for review are not retold again.
+      for (final block in blocks)
+        if (awaitsReview(block, byId)) ...[
+          ...block.messageIds,
+          ...block.draft!.messageIds,
+        ],
+    };
     final source = <ChatMessage>[];
     var sourceTokens = 0;
     for (final message in eligible.take(split)) {
@@ -694,12 +719,17 @@ class SummaryChain {
     return [for (final b in blocks) b.id == id ? approved : b];
   }
 
-  /// The draft of [id] with [content] as its text.
+  /// The draft of [id] with [content] as its text. Throws `not_live` when
+  /// the active block [id] has no draft any more — merged away or discarded
+  /// while the editor was open — rather than drop the edit unsaid.
   static List<SummaryBlock> editDraft(
     List<SummaryBlock> blocks,
     String id,
     String content,
   ) {
+    if (!blocks.any((b) => b.id == id && !b.archived && b.draft != null)) {
+      throw const SummaryChainException('not_live');
+    }
     final text = content.trim();
     return [
       for (final block in blocks)

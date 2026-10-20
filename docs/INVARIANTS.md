@@ -401,14 +401,6 @@ read first; off, the prompts go as chosen and the text is kept. The transcript
 is the message text alone: summarizing reads nothing from Ledger or Studio and
 runs after every bot turn, Studio on or off.
 
-A summarizer's refusal is not a summary. An answer that is short and opens
-with a refusing phrase (`SummaryRefusal.looksLike`) is rejected with
-`SummaryChainException('refused')` before the size check, by compaction, merge
-and regeneration alike, and a refused shortening keeps the first answer. It
-would otherwise be shorter than its source and be kept as a block, standing in
-for messages with nothing of them in it. Covered by
-`test/summary_preamble_test.dart` and `test/summary_regenerate_test.dart`.
-
 A block whose sources were edited, swiped or deleted is stale: it is not sent,
 its messages return to the prompt, and the next compaction drops it together
 with its archive. Deleting a merge restores its parts; deleting a level-1 block
@@ -424,7 +416,8 @@ the draft (`approveDraft`), which puts it in place — same id, level, parts and
 place in the chain, the draft's sources and fingerprint. The reader may edit
 the draft first or discard it. A level-1 block retells its messages as they
 read today, with the live blocks before it as context, so approving brings a
-stale one back. A merge is merged again from its archived parts; a stale merge
+stale one back; until then compaction neither drops a stale block whose draft
+is fresh nor retells its messages again (`SummaryChain.awaitsReview`). A merge is merged again from its archived parts; a stale merge
 is refused (`stale_merge`), since its parts are as out of date as it is. Notes
 are never regenerated. The new text must be shorter than its source, and a
 draft whose messages changed after it was written is not approved

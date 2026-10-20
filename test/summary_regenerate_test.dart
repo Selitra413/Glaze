@@ -313,16 +313,6 @@ void main() {
     expect((await _one(h.container, 'b1')).draft, isNull);
   });
 
-  test('a refusal is not a draft', () async {
-    final h = await _harness([
-      _block('b1', ['m0', 'm1']),
-    ]);
-    h.llm.answer = "I'm sorry, but I can't help with summarizing this content.";
-
-    await expectLater(_regenerate(h.container, 'b1'), _reason('refused'));
-    expect((await _one(h.container, 'b1')).draft, isNull);
-  });
-
   test(
     'the refusal instruction goes first in the prompt when it is on',
     () async {

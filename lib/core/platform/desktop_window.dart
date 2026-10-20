@@ -58,7 +58,11 @@ Future<void> initDesktopWindow() async {
   // comes to [DesktopCloseHandler], which marks the run as closed first.
   await windowManager.setPreventClose(true);
   windowManager.addListener(
-    DesktopCloseHandler(markClosed: AppLog.markClosed, closeWindow: _letClose),
+    DesktopCloseHandler(
+      markClosed: AppLog.markClosed,
+      unmarkClosed: AppLog.unmarkClosed,
+      closeWindow: _letClose,
+    ),
   );
 }
 
@@ -94,9 +98,18 @@ Future<void> _letClose() async {
 /// first, then the close is let through as before.
 class DesktopCloseHandler extends WindowListener {
   final void Function() markClosed;
+
+  /// Undoes [markClosed] when the window did not go after all.
+  final void Function() unmarkClosed;
   final Future<void> Function() closeWindow;
 
-  DesktopCloseHandler({required this.markClosed, required this.closeWindow});
+  DesktopCloseHandler({
+    required this.markClosed,
+    required this.closeWindow,
+    void Function()? unmarkClosed,
+  }) : unmarkClosed = unmarkClosed ?? _noop;
+
+  static void _noop() {}
 
   bool _closing = false;
 
@@ -115,6 +128,7 @@ class DesktopCloseHandler extends WindowListener {
       unawaited(
         closeWindow().catchError((Object e, StackTrace s) {
           _closing = false;
+          unmarkClosed();
           debugPrint('[desktop] close failed: $e');
         }),
       );

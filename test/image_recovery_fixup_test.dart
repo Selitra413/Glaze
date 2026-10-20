@@ -46,6 +46,34 @@ void main() {
     expect(identical(fixed, clean), isTrue);
   });
 
+  test('a finished image block is not taken for a stuck one', () {
+    const done =
+        'Look: <img data-iig-instruction=\'{"prompt":"cat"}\' src="cat.png">';
+    final finished = session([
+      ChatMessage(
+        id: 'a',
+        role: 'assistant',
+        content: done,
+        swipes: const [done],
+        swipeId: 0,
+        swipesMeta: [
+          {
+            'agentSwipes': [
+              const AgentSwipe(content: done, kind: 'final').toJson(),
+            ],
+            'agentSwipeId': 0,
+          },
+        ],
+        agentSwipes: const [AgentSwipe(content: done, kind: 'final')],
+        agentSwipeId: 0,
+      ),
+    ]);
+
+    final fixed = ImageRecoveryService.fixupSwipesWithImageResults(finished);
+
+    expect(identical(fixed, finished), isTrue);
+  });
+
   test('the active swipe is brought in line with the content', () {
     final drifted = session([
       const ChatMessage(

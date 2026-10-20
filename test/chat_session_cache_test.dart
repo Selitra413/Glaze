@@ -48,7 +48,7 @@ void main() {
   });
 
   test(
-    'the current session is decoded once and then served from the cache',
+    'opening reads the row and fills the cache for the switch that follows',
     () async {
       await container.read(chatRepoProvider).put(session(0));
 
@@ -56,15 +56,24 @@ void main() {
       expect(first?.id, 'char_0');
       expect(ChatSessionService.cacheSize, 1);
 
-      final again = await service.findExistingSession('char');
-      expect(identical(again, first), isTrue);
-      // Switching to it finds it there too.
+      // Switching to it finds it in the cache.
       expect(
         identical(await service.switchToSession('char', 0), first),
         isTrue,
       );
     },
   );
+
+  test('a write that bypasses the cache is seen on the next open', () async {
+    final repo = container.read(chatRepoProvider);
+    await repo.put(session(0));
+    await service.findExistingSession('char');
+
+    await repo.updateSessionVarsJson('char_0', (vars) => {...vars, 'k': 'v'});
+
+    final reopened = await service.findExistingSession('char');
+    expect(reopened?.sessionVars['k'], 'v');
+  });
 
   test(
     'a small neighbour is loaded ahead; a long one is left on disk',

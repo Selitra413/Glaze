@@ -109,7 +109,6 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       'select_two' => 'summary_error_select_two'.tr(),
       'stale_merge' => 'summary_error_stale_merge'.tr(),
       'sources_gone' => 'summary_error_sources_gone'.tr(),
-      'refused' => 'summary_error_refused'.tr(),
       _ => 'summary_error_changed'.tr(),
     };
   }

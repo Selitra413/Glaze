@@ -169,3 +169,34 @@ test('reduced motion scrolls a notch at once', async ({ page }) => {
 
   expect(Math.abs(after - (start - 300))).toBeLessThan(0.6);
 });
+
+test('a chat set anew drops what the last one still owed', async ({ page }) => {
+  await openChat(page);
+  await page.evaluate(() => window.bridge.relayNativeWheel(true));
+
+  const pending = await page.evaluate(([d, at]) => {
+    window.bridge.wheelScroll(0, d, at.x, at.y);
+    window.bridge.setMessages('[]');
+    return window.bridge._scrollRelay.pendingWheel.dy;
+  }, [-300, CURSOR]);
+
+  expect(pending).toBe(0);
+});
+
+test('a wheel listener inside a message sees the relayed notch', async ({ page }) => {
+  await openChat(page);
+  await page.evaluate(() => window.bridge.relayNativeWheel(true));
+
+  const inside = await page.evaluate((at) => {
+    const host = document.elementFromPoint(at.x, at.y);
+    const inner = host?.shadowRoot?.elementFromPoint(at.x, at.y);
+    if (!inner || inner === host) return false;
+    window.__innerWheels = 0;
+    inner.addEventListener('wheel', () => window.__innerWheels++);
+    return true;
+  }, CURSOR);
+  expect(inside).toBe(true);
+
+  await wheel(page, -100);
+  await expect.poll(() => page.evaluate(() => window.__innerWheels)).toBeGreaterThan(0);
+});

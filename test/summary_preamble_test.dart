@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:glaze_flutter/core/llm/summary_refusal.dart';
 import 'package:glaze_flutter/core/services/summary_preamble.dart';
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 
@@ -74,48 +73,6 @@ void main() {
         await c.read(summaryPreambleProvider.future),
         const SummaryPreamble(),
       );
-    });
-  });
-
-  group('SummaryRefusal', () {
-    test('knows an apology when it sees one', () {
-      for (final refusal in const [
-        "I'm sorry, but I can't help with that.",
-        'I cannot summarize this content as it contains explicit material.',
-        "Sorry, I can’t assist with this request.",
-        'I am unable to continue with this request.',
-        'As an AI language model, I must decline.',
-        'Извините, но я не могу помочь с этим запросом.',
-        'К сожалению, я не могу продолжить пересказ этого содержания.',
-        'Я не буду пересказывать такой контент.',
-      ]) {
-        expect(SummaryRefusal.looksLike(refusal), isTrue, reason: refusal);
-      }
-    });
-
-    test('leaves a summary alone, even one that quotes a refusal', () {
-      expect(
-        SummaryRefusal.looksLike(
-          'Mara reached the pass after dark and found the gate barred. '
-          'Tomas refused to turn back; "I can\'t leave her," he said, and '
-          'they camped below the wall until dawn.',
-        ),
-        isFalse,
-      );
-      // Short and third-person: the phrase is not there.
-      expect(
-        SummaryRefusal.looksLike('Mara could not open the gate. They waited.'),
-        isFalse,
-      );
-      // Long enough to be a summary whatever it opens with.
-      expect(
-        SummaryRefusal.looksLike(
-          "I'm sorry to say the night went badly for them. "
-          '${'They walked on through the snow. ' * 30}',
-        ),
-        isFalse,
-      );
-      expect(SummaryRefusal.looksLike(''), isFalse);
     });
   });
 }

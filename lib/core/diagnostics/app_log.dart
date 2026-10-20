@@ -50,6 +50,11 @@ abstract final class AppLog {
   static bool _forwarding = false;
   static Timer? _flushTimer;
   static SessionTracker? _tracker;
+
+  /// Set once the user closed the window: lifecycle changes that come in
+  /// while it goes (losing focus reads `inactive`) must not turn the marker
+  /// back to `foreground`.
+  static bool _closedByUser = false;
   // Held so the listener stays registered for the life of the process.
   // ignore: unused_field
   static AppLifecycleListener? _lifecycle;
@@ -132,6 +137,7 @@ abstract final class AppLog {
       _lifecycle = AppLifecycleListener(
         onStateChange: _onLifecycle,
         onExitRequested: () async {
+          _closedByUser = true;
           _tracker?.update(SessionState.closed);
           flush();
           return AppExitResponse.exit;
@@ -173,8 +179,19 @@ abstract final class AppLog {
   /// marker still saying `foreground`. `initDesktopWindow` intercepts the
   /// close and calls this first.
   static void markClosed() {
+    _closedByUser = true;
     _tracker?.update(SessionState.closed);
     _append(LogLevel.info, 'Window closed by the user');
+    flush();
+  }
+
+  /// The close recorded by [markClosed] did not go through and the window is
+  /// still up: the run is live again.
+  static void unmarkClosed() {
+    if (!_closedByUser) return;
+    _closedByUser = false;
+    _tracker?.update(SessionState.foreground);
+    _append(LogLevel.warn, 'Window close did not go through');
     flush();
   }
 
@@ -267,7 +284,7 @@ abstract final class AppLog {
   }
 
   static void _onLifecycle(AppLifecycleState state) {
-    _tracker?.update(_stateFor(state));
+    if (!_closedByUser) _tracker?.update(_stateFor(state));
     _append(LogLevel.info, 'Lifecycle: ${state.name}');
     if (state != AppLifecycleState.resumed) flush();
   }
@@ -275,11 +292,16 @@ abstract final class AppLog {
   /// The state a run starts in. A desktop app reads `detached` until its
   /// window is first focused, which on Windows is only once the user clicks
   /// it — a run that dies before that would read as closed on purpose. The
-  /// run has only just begun, so it is on its way to the screen.
+  /// run has only just begun, so it is on its way to the screen. On mobile
+  /// `detached` at start can be a launch into the background (iOS background
+  /// modes), which keeps its usual meaning.
   static SessionState _initialState(AppLifecycleState? state) =>
-      state == AppLifecycleState.detached
+      state == AppLifecycleState.detached && _isDesktop
       ? SessionState.foreground
       : _stateFor(state);
+
+  static bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   static SessionState _stateFor(AppLifecycleState? state) => switch (state) {
     null ||

@@ -961,6 +961,10 @@ export class Bridge {
     // remember the current reading position so the batch replace below doesn't
     // yank the chat back to the top/bottom.
     const anchor = preserveScroll ? this.virtualList.captureAnchor() : null;
+    // A chat replaced outright (a session switch, a reopen) starts still: a
+    // notch or a flick left over from the last one would pull the new chat
+    // away from its jump to the bottom.
+    if (!preserveScroll) this._scrollRelay.stop();
     this._panelHost?.closeAll();
     const container = document.getElementById('chat-container') || document.body;
     if (![...container.classList].some(c => c.startsWith('layout-'))) {

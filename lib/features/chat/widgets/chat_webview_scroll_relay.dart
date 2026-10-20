@@ -171,7 +171,6 @@ class _ChatWebViewScrollRelayState
   );
   late final ScrollRelaySink _notches = ScrollRelaySink(_sendWheel);
   double _devicePixelRatio = 1;
-  ChatBridgeController? _relayingWheelFor;
 
   ChatBridgeController? get _bridge =>
       mounted ? ref.read(chatBridgeRegistryProvider(widget.charId)) : null;
@@ -225,13 +224,6 @@ class _ChatWebViewScrollRelayState
     _notches.add(delta.dx, delta.dy, event.localPosition);
   }
 
-  /// Once per page: from here on its native wheel is a duplicate.
-  void _relayWheelFor(ChatBridgeController? bridge) {
-    if (bridge == null || identical(bridge, _relayingWheelFor)) return;
-    _relayingWheelFor = bridge;
-    unawaited(bridge.relayNativeWheel(true));
-  }
-
   @override
   void dispose() {
     _pans.dispose();
@@ -245,12 +237,6 @@ class _ChatWebViewScrollRelayState
     _devicePixelRatio =
         MediaQuery.maybeDevicePixelRatioOf(context) ??
         View.of(context).devicePixelRatio;
-    // The registry publishes the bridge once the page is painted — the moment
-    // to switch its native wheel off.
-    ref.listen(
-      chatBridgeRegistryProvider(widget.charId),
-      (_, bridge) => _relayWheelFor(bridge),
-    );
     return Listener(
       // Opaque rather than deferToChild: on Windows the WebView is composited
       // from a Texture, which is not hit-testable by itself, so deferring

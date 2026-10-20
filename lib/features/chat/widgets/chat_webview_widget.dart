@@ -32,6 +32,7 @@ import 'chat_webview_ext_block_callbacks.dart';
 import 'chat_webview_initializer.dart';
 import 'chat_webview_panel_refresher.dart';
 import 'chat_webview_recovery.dart';
+import 'chat_webview_scroll_relay.dart';
 import 'chat_webview_surface.dart';
 import 'chat_webview_sync_dispatcher.dart';
 import 'message_scripts_prompt_sheet.dart';
@@ -555,6 +556,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           // trackpad sink until the page bridge and its DOM are initialized.
           ref.read(chatBridgeRegistryProvider(widget.charId).notifier).state =
               bridge;
+          // Every page init, not once per controller: a reloaded page starts
+          // with its native wheel on again, and the same controller may be
+          // published to the registry already, so nothing else would notice.
+          if (ChatWebViewScrollRelay.isSupported) {
+            unawaited(bridge.relayNativeWheel(true));
+          }
         },
         onSyncExtBlockPanels: _syncExtBlockPanels,
         applyTheme: _applyThemeToBridge,
@@ -659,7 +666,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   /// Tells the reader the chat view could not be brought up, once per widget.
   void _notifyWebViewFailure(Object message) {
     if (!mounted || _bridgeFailureNotified) return;
-    _bridgeFailureNotified = true;
+    // Also lowers the surface cover: the page will not report its first
+    // paint now, and a spinner that never ends over a view that takes no
+    // input would read as still loading.
+    setState(() => _bridgeFailureNotified = true);
     GlazeErrorDialog.show(
       context,
       message,
@@ -1445,7 +1455,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       isActive: (epoch) =>
           mounted && _lifecycleActive && epoch == _lifecycleEpoch,
       sessionSwitching: _sessionSwitching,
-      ready: _ready,
+      ready: _ready || _bridgeFailureNotified,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,
       bgBlur: widget.bgBlur,

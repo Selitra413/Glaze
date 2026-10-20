@@ -178,6 +178,51 @@ void main() {
       ];
       expect(SummaryChain.withoutStale(blocks, edited), isEmpty);
     });
+
+    test('a stale block with a fresh draft waits for the reader', () {
+      final messages = _chat(10);
+      final edited = [
+        messages[0].copyWith(content: 'changed'),
+        ...messages.skip(1),
+      ];
+      final ids = ['m0', 'm1'];
+      final blocks = [
+        _block('a', messages, ids).withDraft(
+          SummaryDraft(
+            content: 'Retold',
+            messageIds: ids,
+            sourceHash: SummaryChain.fingerprint(
+              ids,
+              SummaryChain.index(edited),
+            ),
+          ),
+        ),
+      ];
+
+      expect(SummaryChain.withoutStale(blocks, edited), blocks);
+      // Its messages are not retold again while the draft waits.
+      final plan = SummaryChain.planSource(
+        blocks: blocks,
+        messages: edited,
+        tailBudgetTokens: 0,
+        maxSourceTokens: 100000,
+      );
+      expect(plan.source.first.id, 'm2');
+    });
+
+    test('editing a draft that is gone says so', () {
+      final messages = _chat(4);
+      expect(
+        () => SummaryChain.editDraft(
+          [
+            _block('a', messages, ['m0', 'm1']),
+          ],
+          'a',
+          'text',
+        ),
+        throwsA(isA<SummaryChainException>()),
+      );
+    });
   });
 
   test('withoutCovered removes exactly the covered messages', () {

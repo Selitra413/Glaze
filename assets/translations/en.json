@@ -583,7 +583,6 @@
   "summary_error_changed": "The chat changed while the summary was being written. Try again.",
   "summary_error_stale_merge": "The messages under this merge changed, so its parts are out of date too. Delete the merge to get its parts back, then regenerate them.",
   "summary_error_sources_gone": "None of this block's messages are left to retell. Delete the block instead.",
-  "summary_error_refused": "The model refused to retell these messages and wrote an apology instead of a summary. Turn on the refusal instruction in the summary settings, or pick another model for the Memory slot.",
   "summary_draft_discard": "Discard draft",
   "summary_draft_stale": "The messages changed, so this draft is out of date — regenerate it",
   "summary_saved": "Summary updated",

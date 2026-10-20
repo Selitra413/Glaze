@@ -7,7 +7,6 @@ import '../models/chat_message.dart';
 import '../models/summary_block.dart';
 import 'aux_llm_client.dart';
 import 'macro_engine.dart';
-import 'summary_refusal.dart';
 import 'tokenizer.dart';
 import 'transport/llm_protocol.dart';
 import 'transport/llm_capture_context.dart';
@@ -346,7 +345,6 @@ class SummaryService {
         temperature: temperature,
         cancelToken: cancelToken,
       );
-      if (SummaryRefusal.looksLike(shorter)) return text;
       return estimateTokens(shorter) < tokens ? shorter : text;
     } catch (_) {
       if (cancelToken?.isCancelled == true) rethrow;
