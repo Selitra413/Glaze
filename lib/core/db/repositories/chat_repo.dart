@@ -1326,6 +1326,11 @@ FROM chat_sessions''';
   /// encoding them here in slices and yielding between slices keeps the UI
   /// painting instead. The slices join to the very bytes [jsonEncode] gives
   /// for the whole list: no whitespace, elements comma-separated.
+  ///
+  /// Inside a write transaction the yield keeps the transaction open across
+  /// frames, and other database work queues behind it for as long as the
+  /// encode takes — the same wait the whole-list encode imposed, only with
+  /// frames let through in the meantime.
   static Future<String> _encodeMessagesAsync(List<ChatMessage> messages) async {
     if (messages.length <= _chunkedEncodeMessages) {
       return _encodeMessages(messages);

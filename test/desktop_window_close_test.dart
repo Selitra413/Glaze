@@ -32,6 +32,24 @@ void main() {
     expect(destroyed, isTrue);
   });
 
+  test('a close that fails lets the next request try again', () async {
+    var attempts = 0;
+    final handler = DesktopCloseHandler(
+      markClosed: () {},
+      closeWindow: () async {
+        attempts++;
+        if (attempts == 1) throw StateError('the intercept would not lift');
+      },
+    );
+
+    handler.onWindowClose();
+    await Future<void>.delayed(Duration.zero);
+    handler.onWindowClose();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(attempts, 2);
+  });
+
   test('a repeated close request is honoured once', () async {
     var marked = 0;
     var destroyed = 0;

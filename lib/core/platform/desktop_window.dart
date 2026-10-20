@@ -70,8 +70,15 @@ Future<void> initDesktopWindow() async {
 /// and the window then stays on screen through the whole engine teardown —
 /// several seconds with a large chat open — looking hung.
 Future<void> _letClose() async {
-  await windowManager.setPreventClose(false);
-  await windowManager.close();
+  try {
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
+  } catch (e) {
+    // The intercept would not lift: the window still has to go, even the
+    // slow way.
+    debugPrint('[desktop] close could not be released ($e); destroying');
+    await windowManager.destroy();
+  }
 }
 
 /// Closes the window on the user's request, after the run is recorded as
@@ -103,7 +110,14 @@ class DesktopCloseHandler extends WindowListener {
       markClosed();
     } finally {
       // Whatever the marker did, the user asked to leave: the window goes.
-      unawaited(closeWindow());
+      // If it will not, the next click gets to try again rather than find
+      // the button dead.
+      unawaited(
+        closeWindow().catchError((Object e, StackTrace s) {
+          _closing = false;
+          debugPrint('[desktop] close failed: $e');
+        }),
+      );
     }
   }
 }
