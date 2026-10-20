@@ -296,7 +296,14 @@ void main() {
       // The embedder's per-frame sums carry the pad's sample jitter, and stop
       // dead when the fingers leave; the page is what smooths and glides.
       expect(relayJs, contains('export const PAN_SMOOTHING_MS = 40;'));
-      expect(relayJs, contains('Math.exp(-dt / PAN_SMOOTHING_MS)'));
+      // A frame with no pan in it lets the rest out faster: the content
+      // stops with the fingers, not a few frames after them.
+      expect(relayJs, contains('export const PAN_RELEASE_MS = 12;'));
+      expect(
+        relayJs,
+        contains('this._panFedThisFrame ? PAN_SMOOTHING_MS : PAN_RELEASE_MS'),
+      );
+      expect(relayJs, contains('Math.exp(-dt / panTau)'));
       expect(relayJs, contains('export const FLING_DECAY_MS = 350;'));
       expect(relayJs, contains('export const FLING_MAX_PX_PER_MS = 8;'));
       expect(relayJs, contains('panEnd(vx, vy)'));

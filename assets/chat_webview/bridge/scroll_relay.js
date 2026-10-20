@@ -55,6 +55,12 @@ export const WHEEL_SMOOTHING_MS = 70;
  * what a browser's own input resampling costs. */
 export const PAN_SMOOTHING_MS = 40;
 
+/* Once a frame brings no pan — the fingers paused or left — what the pan still
+ * owes is let out with this constant instead, so the content stops with the
+ * fingers rather than a few frames after them. Only the arrival of input is
+ * smoothed, not its end. */
+export const PAN_RELEASE_MS = 12;
+
 /* After the fingers leave the pad the content keeps the speed they had and
  * loses 1 − e^(−dt/τ) of it per frame with τ = this many milliseconds, so a
  * hard flick glides for about two seconds — the same shape Flutter's own
@@ -93,6 +99,7 @@ export class ScrollRelay {
     this._cursorY = NaN;
     this._frameId = 0;
     this._frameAt = 0;
+    this._panFedThisFrame = false;
     this._nativeWheelRelayed = false;
     this._frame = this._frame.bind(this);
     this._swallowNativeWheel = (e) => {
@@ -198,6 +205,7 @@ export class ScrollRelay {
     if (dy * this._owedPanY < 0) this._owedPanY = 0;
     this._owedPanX += dx;
     this._owedPanY += dy;
+    this._panFedThisFrame = true;
     this._wake();
   }
 
@@ -265,7 +273,9 @@ export class ScrollRelay {
     this._frameAt = now;
     const grain = 1 / (window.devicePixelRatio || 1);
     const wheelShare = 1 - Math.exp(-dt / WHEEL_SMOOTHING_MS);
-    const panShare = 1 - Math.exp(-dt / PAN_SMOOTHING_MS);
+    const panTau = this._panFedThisFrame ? PAN_SMOOTHING_MS : PAN_RELEASE_MS;
+    this._panFedThisFrame = false;
+    const panShare = 1 - Math.exp(-dt / panTau);
     const flingDecay = Math.exp(-dt / FLING_DECAY_MS);
 
     const wheelX = this._stepOf(this._owedWheelX, wheelShare, grain);

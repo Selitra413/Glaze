@@ -124,6 +124,24 @@ test('a jittery pan stream comes out even, and nothing of it is lost', async ({ 
   expect(Math.abs((await scrollTop(page)) - (start + total))).toBeLessThan(0.6);
 });
 
+test('the chat stops with the fingers, not a few frames after them', async ({ page }) => {
+  await openChat(page);
+  const start = await scrollTop(page);
+
+  // A steady drag that pauses: the frames after the last pan.
+  const deltas = [];
+  for (let i = 0; i < 20; i++) deltas.push(-6);
+  const moves = await drag(page, deltas);
+
+  // `drag` records a frame's move before feeding that frame's pan, so the
+  // last pan is applied from index 21 on; what is still owed then goes out
+  // within a couple of frames.
+  const tail = moves.slice(21);
+  expect(tail.length).toBeLessThanOrEqual(3);
+  const total = deltas.reduce((a, b) => a + b, 0);
+  expect(Math.abs((await scrollTop(page)) - (start + total))).toBeLessThan(2);
+});
+
 test('a flick keeps the chat gliding after the fingers leave, then dies away', async ({ page }) => {
   await openChat(page);
   const start = await scrollTop(page);
