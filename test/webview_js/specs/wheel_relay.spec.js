@@ -187,16 +187,30 @@ test('a wheel listener inside a message sees the relayed notch', async ({ page }
   await openChat(page);
   await page.evaluate(() => window.bridge.relayNativeWheel(true));
 
-  const inside = await page.evaluate((at) => {
-    const host = document.elementFromPoint(at.x, at.y);
-    const inner = host?.shadowRoot?.elementFromPoint(at.x, at.y);
-    if (!inner || inner === host) return false;
-    window.__innerWheels = 0;
-    inner.addEventListener('wheel', () => window.__innerWheels++);
-    return true;
-  }, CURSOR);
-  expect(inside).toBe(true);
+  // A point inside a message's shadow root that is on screen, wherever the
+  // layout put it.
+  const at = await page.evaluate(() => {
+    const hosts = [...document.querySelectorAll('#chat-container *')]
+      .filter((el) => el.shadowRoot);
+    for (const host of hosts) {
+      for (const inner of host.shadowRoot.querySelectorAll('*')) {
+        const r = inner.getBoundingClientRect();
+        if (r.width < 4 || r.height < 4) continue;
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+        if (document.elementFromPoint(x, y) !== host) continue;
+        const hit = host.shadowRoot.elementFromPoint(x, y);
+        if (!hit || hit === host) continue;
+        window.__innerWheels = 0;
+        hit.addEventListener('wheel', () => window.__innerWheels++);
+        return { x, y };
+      }
+    }
+    return null;
+  });
+  expect(at).not.toBeNull();
 
-  await wheel(page, -100);
+  await page.evaluate((p) => window.bridge.wheelScroll(0, -100, p.x, p.y), at);
   await expect.poll(() => page.evaluate(() => window.__innerWheels)).toBeGreaterThan(0);
 });
