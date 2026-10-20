@@ -771,11 +771,15 @@ class MenuFieldItem extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: context.cs.onSurfaceVariant,
-                  fontSize: 13,
+              // Flexible: a long label wraps on a narrow screen instead of
+              // pushing the expand button off the row.
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: context.cs.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
                 ),
               ),
               if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),

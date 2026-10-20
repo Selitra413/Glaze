@@ -41,6 +41,9 @@ class SummaryBlock {
   final int sourceTokens;
   final int createdAt;
 
+  /// The block written again, waiting for the reader to approve it.
+  final SummaryDraft? draft;
+
   const SummaryBlock({
     required this.id,
     required this.level,
@@ -52,6 +55,7 @@ class SummaryBlock {
     this.tokens = 0,
     this.sourceTokens = 0,
     this.createdAt = 0,
+    this.draft,
   });
 
   bool get isNote => level == 0;
@@ -68,7 +72,23 @@ class SummaryBlock {
         tokens: tokens ?? this.tokens,
         sourceTokens: sourceTokens,
         createdAt: createdAt,
+        draft: draft,
       );
+
+  /// This block with [draft] in place of the one it has; null drops it.
+  SummaryBlock withDraft(SummaryDraft? draft) => SummaryBlock(
+    id: id,
+    level: level,
+    content: content,
+    messageIds: messageIds,
+    sourceHash: sourceHash,
+    childIds: childIds,
+    archived: archived,
+    tokens: tokens,
+    sourceTokens: sourceTokens,
+    createdAt: createdAt,
+    draft: draft,
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -81,6 +101,7 @@ class SummaryBlock {
     'tokens': tokens,
     'sourceTokens': sourceTokens,
     'createdAt': createdAt,
+    if (draft case final draft?) 'draft': draft.toJson(),
   };
 
   static SummaryBlock? fromJson(Object? raw) {
@@ -88,21 +109,18 @@ class SummaryBlock {
     final id = raw['id'];
     final content = raw['content'];
     if (id is! String || id.isEmpty || content is! String) return null;
-    List<String> strings(Object? value) => value is List
-        ? value.whereType<String>().toList(growable: false)
-        : const [];
-    int number(Object? value) => value is num ? value.toInt() : 0;
     return SummaryBlock(
       id: id,
-      level: number(raw['level']).clamp(0, 99),
+      level: _number(raw['level']).clamp(0, 99),
       content: content,
-      messageIds: strings(raw['messageIds']),
+      messageIds: _strings(raw['messageIds']),
       sourceHash: raw['sourceHash'] as String? ?? '',
-      childIds: strings(raw['childIds']),
+      childIds: _strings(raw['childIds']),
       archived: raw['archived'] == true,
-      tokens: number(raw['tokens']),
-      sourceTokens: number(raw['sourceTokens']),
-      createdAt: number(raw['createdAt']),
+      tokens: _number(raw['tokens']),
+      sourceTokens: _number(raw['sourceTokens']),
+      createdAt: _number(raw['createdAt']),
+      draft: SummaryDraft.fromJson(raw['draft']),
     );
   }
 
@@ -122,6 +140,70 @@ class SummaryBlock {
     }
   }
 }
+
+/// A block written again, waiting for the reader — the way a Memory Books
+/// draft waits for approval. Until it is approved the block keeps standing in
+/// for its messages with the text it had; a draft is never sent.
+///
+/// It records the sources it was written over — a level-1 block's messages
+/// that still exist, a merge's union — and their fingerprint, so a draft whose
+/// messages changed after it was written is never approved
+/// ([SummaryChain.isDraftStale]).
+class SummaryDraft {
+  final String content;
+  final List<String> messageIds;
+  final String sourceHash;
+  final int tokens;
+  final int sourceTokens;
+  final int createdAt;
+
+  const SummaryDraft({
+    required this.content,
+    this.messageIds = const [],
+    this.sourceHash = '',
+    this.tokens = 0,
+    this.sourceTokens = 0,
+    this.createdAt = 0,
+  });
+
+  SummaryDraft copyWith({String? content, int? tokens}) => SummaryDraft(
+    content: content ?? this.content,
+    messageIds: messageIds,
+    sourceHash: sourceHash,
+    tokens: tokens ?? this.tokens,
+    sourceTokens: sourceTokens,
+    createdAt: createdAt,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'content': content,
+    'messageIds': messageIds,
+    'sourceHash': sourceHash,
+    'tokens': tokens,
+    'sourceTokens': sourceTokens,
+    'createdAt': createdAt,
+  };
+
+  static SummaryDraft? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final content = raw['content'];
+    if (content is! String) return null;
+    return SummaryDraft(
+      content: content,
+      messageIds: _strings(raw['messageIds']),
+      sourceHash: raw['sourceHash'] as String? ?? '',
+      tokens: _number(raw['tokens']),
+      sourceTokens: _number(raw['sourceTokens']),
+      createdAt: _number(raw['createdAt']),
+    );
+  }
+}
+
+List<String> _strings(Object? value) => value is List
+    ? value.whereType<String>().toList(growable: false)
+    : const [];
+
+int _number(Object? value) => value is num ? value.toInt() : 0;
 
 /// What the prompt gets from the summary: the text, and the messages it
 /// stands in for.
@@ -232,6 +314,22 @@ class SummaryChain {
     return fingerprint(block.messageIds, byId) != block.sourceHash;
   }
 
+  /// True once a draft's sources changed after it was written: approved, it
+  /// would stand in for messages that no longer read the way it says.
+  static bool isDraftStale(SummaryDraft draft, Map<String, ChatMessage> byId) =>
+      fingerprint(draft.messageIds, byId) != draft.sourceHash;
+
+  /// A stale block with a fresh draft waits for the reader: approving the
+  /// draft brings it back, so compaction neither drops it nor retells its
+  /// messages over again meanwhile.
+  static bool awaitsReview(SummaryBlock block, Map<String, ChatMessage> byId) {
+    final draft = block.draft;
+    return draft != null &&
+        !block.archived &&
+        isStale(block, byId) &&
+        !isDraftStale(draft, byId);
+  }
+
   static Map<String, ChatMessage> index(List<ChatMessage> messages) => {
     for (final message in messages) message.id: message,
   };
@@ -273,6 +371,27 @@ class SummaryChain {
       blocks,
       messages,
     ).where((b) => !isStale(b, byId)).toList(growable: false);
+  }
+
+  /// Live blocks that come before [firstMessageId] in story order, notes
+  /// included: the earlier summary a retelling of the run starting there is
+  /// handed as context.
+  static List<SummaryBlock> liveBefore(
+    List<SummaryBlock> blocks,
+    List<ChatMessage> messages,
+    String firstMessageId,
+  ) {
+    final position = {
+      for (var i = 0; i < messages.length; i++) messages[i].id: i,
+    };
+    final first = position[firstMessageId] ?? messages.length;
+    return live(blocks, messages)
+        .where(
+          (b) =>
+              b.isNote ||
+              b.messageIds.any((id) => (position[id] ?? -1) < first),
+        )
+        .toList(growable: false);
   }
 
   static String render(Iterable<SummaryBlock> blocks) => blocks
@@ -373,7 +492,8 @@ class SummaryChain {
   ) => live(blocks, messages).fold(0, (sum, b) => sum + b.tokens);
 
   /// Drops stale active blocks together with the archive they were merged
-  /// from: the archived parts cover the same changed messages.
+  /// from: the archived parts cover the same changed messages. A block that
+  /// [awaitsReview] stays.
   static List<SummaryBlock> withoutStale(
     List<SummaryBlock> blocks,
     List<ChatMessage> messages,
@@ -389,7 +509,11 @@ class SummaryChain {
     }
 
     for (final block in blocks) {
-      if (!block.archived && isStale(block, byId)) drop(block);
+      if (!block.archived &&
+          isStale(block, byId) &&
+          !awaitsReview(block, byId)) {
+        drop(block);
+      }
     }
     if (removed.isEmpty) return blocks;
     return blocks.where((b) => !removed.contains(b.id)).toList();
@@ -415,7 +539,16 @@ class SummaryChain {
       split = i;
     }
 
-    final covered = promptView(blocks, messages).coveredMessageIds;
+    final byId = index(messages);
+    final covered = {
+      ...promptView(blocks, messages).coveredMessageIds,
+      // Messages under a draft waiting for review are not retold again.
+      for (final block in blocks)
+        if (awaitsReview(block, byId)) ...[
+          ...block.messageIds,
+          ...block.draft!.messageIds,
+        ],
+    };
     final source = <ChatMessage>[];
     var sourceTokens = 0;
     for (final message in eligible.take(split)) {
@@ -529,10 +662,83 @@ class SummaryChain {
     if (found.length != children.length) {
       throw const SummaryChainException('not_live');
     }
+    // An archived part is never written again, so a draft it had goes.
     return [
       for (final block in blocks)
-        children.contains(block.id) ? block.copyWith(archived: true) : block,
+        children.contains(block.id)
+            ? block.copyWith(archived: true).withDraft(null)
+            : block,
       merged,
+    ];
+  }
+
+  /// Leaves [draft] on the active block [id], in place of any it had; a null
+  /// [draft] discards it. Throws when that block is no longer active.
+  static List<SummaryBlock> putDraft(
+    List<SummaryBlock> blocks,
+    String id,
+    SummaryDraft? draft,
+  ) {
+    if (!blocks.any((b) => b.id == id && !b.archived)) {
+      throw const SummaryChainException('not_live');
+    }
+    return [
+      for (final block in blocks)
+        block.id == id ? block.withDraft(draft) : block,
+    ];
+  }
+
+  /// Puts the draft of the active block [id] in place of its text: same id,
+  /// level, parts and place in the chain, the draft's sources and
+  /// fingerprint. Throws `not_live` when there is no such draft, and
+  /// `changed` when its messages changed after it was written.
+  static List<SummaryBlock> approveDraft(
+    List<SummaryBlock> blocks,
+    List<ChatMessage> messages,
+    String id,
+  ) {
+    final block = blocks.where((b) => b.id == id && !b.archived).firstOrNull;
+    final draft = block?.draft;
+    if (block == null || draft == null) {
+      throw const SummaryChainException('not_live');
+    }
+    if (isDraftStale(draft, index(messages))) {
+      throw const SummaryChainException('changed');
+    }
+    final approved = SummaryBlock(
+      id: block.id,
+      level: block.level,
+      content: draft.content,
+      messageIds: draft.messageIds,
+      sourceHash: draft.sourceHash,
+      childIds: block.childIds,
+      tokens: draft.tokens,
+      sourceTokens: draft.sourceTokens,
+      createdAt: block.createdAt,
+    );
+    return [for (final b in blocks) b.id == id ? approved : b];
+  }
+
+  /// The draft of [id] with [content] as its text. Throws `not_live` when
+  /// the active block [id] has no draft any more — merged away or discarded
+  /// while the editor was open — rather than drop the edit unsaid.
+  static List<SummaryBlock> editDraft(
+    List<SummaryBlock> blocks,
+    String id,
+    String content,
+  ) {
+    if (!blocks.any((b) => b.id == id && !b.archived && b.draft != null)) {
+      throw const SummaryChainException('not_live');
+    }
+    final text = content.trim();
+    return [
+      for (final block in blocks)
+        switch (block.draft) {
+          final draft? when block.id == id => block.withDraft(
+            draft.copyWith(content: text, tokens: estimateTokens(text)),
+          ),
+          _ => block,
+        },
     ];
   }
 

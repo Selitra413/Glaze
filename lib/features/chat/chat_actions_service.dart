@@ -144,7 +144,8 @@ class ChatActionsService {
     }
 
     final repo = _ref.read(chatRepoProvider);
-    final existingSessions = await repo.getByCharacterId(charId);
+    // Indexes only; the sessions' messages are not needed for the next index.
+    final existingSessions = await repo.getMetadataByCharacterId(charId);
 
     int maxIdx = 0;
     for (final s in existingSessions) {

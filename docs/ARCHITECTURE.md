@@ -593,6 +593,7 @@ the result to recover which blocks landed where.
 | Image gen | `ChatState.isGeneratingImage` + `_imgGenCancelToken` | No (one-shot) | `_imgGenCancelToken` in `ChatNotifier` |
 | Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2). Runs on the Memory slot (`memoryBookApi`), like memory drafts |
 | Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
+| Summary block regeneration | `summaryRegenerationProvider` (app-scoped; the Summary tab only starts and reads it) | No | Per-block `CancelToken` (Stop on the card); the result is a draft that waits for approval (INV-S5) |
 | Memory draft | `memoryDraftJobsProvider` (app-scoped; the memory sheet only starts and reads it) | No | Per-draft `CancelToken`; memory-workflow leases via `memory_active_drafts_provider`; 5xx/timeouts retried by `AuxLlmClient` |
 
 ### Reasoning / Thinking

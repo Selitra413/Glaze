@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../db/app_db.dart' as db;
 import '../db/repositories/summary_repo.dart';
 import '../models/api_config.dart';
 import '../models/chat_message.dart';
@@ -175,8 +176,10 @@ class SummaryService {
   /// The session's blocks, archive included. A row from before blocks
   /// existed reads as one note holding its text, so an old summary keeps
   /// being sent — it just stands in for no messages.
-  Future<List<SummaryBlock>> getBlocks(String sessionId) async {
-    final row = await _repo.get(sessionId);
+  Future<List<SummaryBlock>> getBlocks(String sessionId) async =>
+      _blocksOf(await _repo.get(sessionId));
+
+  static List<SummaryBlock> _blocksOf(db.ChatSummary? row) {
     if (row == null) return const [];
     if (row.blocksJson != null) return SummaryBlock.decodeList(row.blocksJson);
     final legacy = row.content.trim();
@@ -205,6 +208,26 @@ class SummaryService {
       messageCount: messages.length,
     );
   }
+
+  /// Applies [change] to the blocks as stored now and writes the result, in
+  /// one transaction (`docs/rules/database.md`). A null from [change] writes
+  /// nothing. Returns whether anything was written.
+  Future<bool> mutateBlocks({
+    required String sessionId,
+    required List<ChatMessage> messages,
+    required List<SummaryBlock>? Function(List<SummaryBlock> blocks) change,
+  }) => _repo.mutateBlocks(
+    sessionId: sessionId,
+    messageCount: messages.length,
+    mutate: (row) {
+      final next = change(_blocksOf(row));
+      if (next == null) return null;
+      return (
+        blocksJson: SummaryBlock.encodeList(next),
+        content: SummaryChain.render(SummaryChain.live(next, messages)),
+      );
+    },
+  );
 
   /// What the prompt gets: the live blocks' text and the messages they stand
   /// in for. Null when the summary is switched off or empty — then nothing is
@@ -287,8 +310,9 @@ class SummaryService {
   }
 
   /// One summarizer call, and one more to shorten its answer when it came out
-  /// well past [targetTokens]. The shorter text is kept; a failed shortening
-  /// keeps the first answer, which is complete.
+  /// well past [targetTokens]. The shorter text is kept; a failed shortening,
+  /// or one the model refused — shorter than anything — keeps the first
+  /// answer, which is complete.
   Future<String> _summarize({
     required String sessionId,
     required ApiConfig apiConfig,

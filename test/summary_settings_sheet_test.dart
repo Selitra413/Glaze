@@ -11,10 +11,12 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
+import 'package:glaze_flutter/core/services/summary_preamble.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/features/chat/chat_provider.dart';
 import 'package:glaze_flutter/features/chat/chat_session_service.dart';
+import 'package:glaze_flutter/features/chat/state/summary_regeneration_provider.dart';
 import 'package:glaze_flutter/features/chat/widgets/memory_sheet.dart';
 import 'package:glaze_flutter/features/chat/widgets/summary_settings_sheet.dart';
 import 'package:glaze_flutter/shared/theme/app_theme.dart';
@@ -28,12 +30,32 @@ import 'package:glaze_flutter/shared/widgets/glaze_action_button.dart';
 const _charId = 'char-summary';
 const _sessionId = 'session-summary';
 
-Future<ProviderContainer> _seed() async {
+const _hello = ChatMessage(
+  id: 'm1',
+  role: 'user',
+  content: 'Hello',
+  timestamp: 1,
+);
+
+const _note = SummaryBlock(
+  id: 'note',
+  level: 0,
+  content: 'They reached the pass after dark.',
+);
+
+Future<ProviderContainer> _seed({
+  List<SummaryBlock> blocks = const [_note],
+  bool regenerating = false,
+}) async {
   SharedPreferences.setMockInitialValues({});
   ChatSessionService.clearCache();
   final db = AppDatabase.forTesting(NativeDatabase.memory());
   final container = ProviderContainer(
-    overrides: [appDbProvider.overrideWithValue(db)],
+    overrides: [
+      appDbProvider.overrideWithValue(db),
+      if (regenerating)
+        summaryRegenerationProvider.overrideWith(_RegeneratingB1.new),
+    ],
   );
   addTearDown(() async {
     container.dispose();
@@ -51,26 +73,61 @@ Future<ProviderContainer> _seed() async {
           id: _sessionId,
           characterId: _charId,
           sessionIndex: 0,
-          messages: [
-            ChatMessage(id: 'm1', role: 'user', content: 'Hello', timestamp: 1),
-          ],
+          messages: [_hello],
         ),
       );
   await container
       .read(summaryServiceProvider)
       .saveBlocks(
         sessionId: _sessionId,
-        blocks: const [
-          SummaryBlock(
-            id: 'note',
-            level: 0,
-            content: 'They reached the pass after dark.',
-          ),
-        ],
-        messages: const [],
+        blocks: blocks,
+        messages: const [_hello],
       );
   await container.read(chatProvider(_charId).future);
   return container;
+}
+
+/// A run writing `b1` again, started three seconds ago.
+class _RegeneratingB1 extends SummaryRegenerationNotifier {
+  @override
+  SummaryRegenerationState build() => SummaryRegenerationState(
+    startedAt: {
+      SummaryRegenerationState.key(_sessionId, 'b1'): DateTime.now().subtract(
+        const Duration(seconds: 3),
+      ),
+    },
+  );
+}
+
+final _helloHash = SummaryChain.fingerprint(const [
+  'm1',
+], SummaryChain.index(const [_hello]));
+
+SummaryBlock _retold({SummaryDraft? draft}) => SummaryBlock(
+  id: 'b1',
+  level: 1,
+  content: 'Alice was greeted.',
+  messageIds: const ['m1'],
+  sourceHash: _helloHash,
+  draft: draft,
+);
+
+final _draft = SummaryDraft(
+  content: 'Alice was greeted warmly at the gate.',
+  messageIds: const ['m1'],
+  sourceHash: _helloHash,
+  tokens: 9,
+  sourceTokens: 40,
+);
+
+Future<SummaryBlock> _storedB1(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
+  final blocks = await tester.runAsync(
+    () => container.read(summaryServiceProvider).getBlocks(_sessionId),
+  );
+  return blocks!.firstWhere((b) => b.id == 'b1');
 }
 
 Future<void> _openSheet(
@@ -179,6 +236,110 @@ void main() {
     expect(find.text('summary_trigger_label'.tr()), findsNothing);
     // …and neither is the master switch, which was in the header.
     expect(find.byType(Switch), findsNothing);
+    // A note is the reader's own text: nothing to regenerate.
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsNothing);
+  });
+
+  testWidgets('a retold block can be regenerated, as a Memory Books draft', (
+    tester,
+  ) async {
+    final container = await _seed(blocks: [_note, _retold()]);
+    await _openSheet(tester, container);
+
+    expect(find.text('Alice was greeted.'), findsOneWidget);
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsOneWidget);
+    // Nothing waits for approval yet.
+    expect(find.byTooltip('memory_books_btn_approve'.tr()), findsNothing);
+  });
+
+  testWidgets('a running regeneration counts the seconds and can be stopped', (
+    tester,
+  ) async {
+    final container = await _seed(
+      blocks: [_note, _retold()],
+      regenerating: true,
+    );
+    await _openSheet(tester, container);
+
+    expect(find.text('memory_books_badge_generating'.tr()), findsOneWidget);
+    expect(find.textContaining('3.'), findsOneWidget);
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsNothing);
+    // The summarizer is taken: compaction waits for the run.
+    final compact = tester.widget<GlazeActionButton>(
+      find.widgetWithText(GlazeActionButton, 'summary_compact_now'.tr()),
+    );
+    expect(compact.onTap, isNull);
+
+    await tester.tap(find.byTooltip('memory_books_btn_stop'.tr()));
+    await tester.pump();
+
+    expect(find.text('memory_books_badge_generating'.tr()), findsNothing);
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsOneWidget);
+  });
+
+  testWidgets('a draft waits on its card, and Approve puts it in the block', (
+    tester,
+  ) async {
+    final container = await _seed(
+      blocks: [
+        _note,
+        _retold(draft: _draft),
+      ],
+    );
+    await _openSheet(tester, container);
+
+    expect(find.text('Alice was greeted warmly at the gate.'), findsOneWidget);
+    expect(find.text('Alice was greeted.'), findsNothing);
+    expect(find.text('memory_books_badge_draft'.tr()), findsOneWidget);
+    expect(
+      find.textContaining('memory_books_pending_approval'.tr()),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('summary_draft_discard'.tr()), findsOneWidget);
+    // Regenerate stays under the draft, as under a memory draft.
+    expect(find.text('memory_books_btn_regenerate'.tr()), findsOneWidget);
+
+    await tester.tap(find.byTooltip('memory_books_btn_approve'.tr()));
+    await _settle(tester);
+
+    final stored = await _storedB1(tester, container);
+    expect(stored.content, 'Alice was greeted warmly at the gate.');
+    expect(stored.draft, isNull);
+    expect(find.text('memory_books_badge_draft'.tr()), findsNothing);
+    expect(find.byTooltip('memory_books_btn_approve'.tr()), findsNothing);
+    // Approving says so, as Save does.
+    expect(find.text('summary_saved'.tr()), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('tapping a draft edits it in the Memory Books editor', (
+    tester,
+  ) async {
+    final container = await _seed(
+      blocks: [
+        _note,
+        _retold(draft: _draft),
+      ],
+    );
+    await _openSheet(tester, container);
+
+    await tester.tap(find.text('Alice was greeted warmly at the gate.'));
+    await _settle(tester);
+    // Named by the messages it covers, as a memory entry is.
+    expect(find.text('1'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Alice was greeted warmly at the gate.'),
+      'Alice was let in.',
+    );
+    await tester.tap(find.text('btn_save'.tr()));
+    await _settle(tester);
+
+    final stored = await _storedB1(tester, container);
+    expect(stored.draft?.content, 'Alice was let in.');
+    expect(stored.content, 'Alice was greeted.');
+    expect(find.text('Alice was let in.'), findsOneWidget);
+    expect(find.text('summary_draft_saved'.tr()), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
   });
 
   testWidgets('the header button opens the settings, switch and all', (
@@ -213,10 +374,51 @@ void main() {
     expect(find.text('summary_prompt_shorten_label'.tr()), findsOneWidget);
     expect(find.text('summary_prompt_view_current'.tr()), findsOneWidget);
     expect(find.text('memory_prompt_manage'.tr()), findsOneWidget);
+    // The refusal instruction's field shows only once its switch is on.
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Recap (recommended)'), findsOneWidget);
     expect(find.text('Keep continuity (recommended)'), findsOneWidget);
     expect(find.text('Keep facts (recommended)'), findsOneWidget);
+  });
+
+  testWidgets('the refusal instruction is a switch over its text', (
+    tester,
+  ) async {
+    final container = await _seed();
+    await _openSheet(tester, container);
+    await _openSettings(tester);
+
+    await _scrollTo(tester, find.byKey(const Key('summary_preamble')));
+    expect(find.text('summary_preamble_label'.tr()), findsOneWidget);
+    expect(find.text('summary_preamble_hint'.tr()), findsOneWidget);
+    // Off by default, and the text stays out of the way until it is on.
+    expect(find.byKey(const Key('summary_preamble_text')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('summary_preamble')));
+    await tester.pump();
+    await _scrollTo(tester, find.byKey(const Key('summary_preamble_text')));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('summary_preamble_text')))
+          .controller
+          ?.text,
+      SummaryPreamble.defaultText,
+    );
+    await tester.enterText(
+      find.byKey(const Key('summary_preamble_text')),
+      'Retell it all.',
+    );
+    await tester.tap(find.byIcon(Icons.check_rounded));
+    await _settle(tester);
+
+    await tester.runAsync(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(SummaryPreambleNotifier.prefsKey);
+      expect(
+        SummaryPreamble.fromJson(jsonDecode(raw!) as Map<String, dynamic>),
+        const SummaryPreamble(enabled: true, text: 'Retell it all.'),
+      );
+    });
   });
 
   testWidgets('the switch in the settings is the injection master switch', (

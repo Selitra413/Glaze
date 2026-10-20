@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,23 +8,26 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/summary_block.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_expansion_tile.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../chat_provider.dart';
 import '../services/summary_generation_service.dart';
-import 'memory/memory_books_controls.dart';
-
-const Color _kOrange = Color(0xFFFF9800);
+import '../state/summary_regeneration_provider.dart';
+import 'summary_block_card.dart';
+import 'summary_block_editor_sheet.dart';
 
 /// Summary tab of the Memory sheet.
 ///
 /// The summary is a chain of blocks (see [SummaryBlock]): each retells a run
 /// of old messages and is sent in their place. The tab lists the active
 /// chain in story order, the archive of merged-away blocks below it, and the
-/// actions that change the chain — compact now, merge a selection, add a note.
+/// actions that change the chain — compact now, merge a selection, add a note,
+/// write one block again. A block written again comes back as a draft on its
+/// card and replaces the block's text only once approved, the way a Memory
+/// Books draft becomes an entry.
 ///
 /// Everything else — the master switch, the template, when compaction runs,
 /// the injection point — is behind the header's settings button, in
@@ -68,21 +73,30 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
 
   /// Runs a change to the chain, then reloads it. Errors land under the
   /// action bar rather than in a toast: a summarizer failure needs reading.
-  Future<void> _run(Future<void> Function(ChatSession session) action) async {
+  /// Returns whether the change went through.
+  Future<bool> _run(Future<void> Function(ChatSession session) action) async {
     final session = _session;
-    if (session == null || _busy) return;
+    if (session == null || _busy) return false;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await action(session);
+      return true;
     } catch (e) {
       if (mounted) setState(() => _error = _describe(e));
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
       await _load();
     }
+  }
+
+  /// Says a saved change landed — the reader pressed Save or Approve and the
+  /// sheet gives no other sign of it.
+  void _saved(bool ok, String message) {
+    if (ok && mounted) GlazeToast.show(context, message.tr());
   }
 
   Object _describe(Object error) {
@@ -93,6 +107,8 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       'not_adjacent' => 'summary_error_not_adjacent'.tr(),
       'mixed_levels' => 'summary_error_mixed_levels'.tr(),
       'select_two' => 'summary_error_select_two'.tr(),
+      'stale_merge' => 'summary_error_stale_merge'.tr(),
+      'sources_gone' => 'summary_error_sources_gone'.tr(),
       _ => 'summary_error_changed'.tr(),
     };
   }
@@ -116,36 +132,90 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     _selected.clear();
   });
 
-  Future<void> _addNote() async {
-    var text = '';
-    await FullscreenEditorScreen.show(
-      context,
-      title: 'summary_note_add'.tr(),
-      initialValue: '',
-      hintText: 'summary_note_hint'.tr(),
-      onChanged: (value) => text = value,
-    );
-    if (text.trim().isEmpty) return;
-    await _run(
-      (session) => _generator.addNote(session: session, content: text),
+  SummaryRegenerationNotifier get _regeneration =>
+      ref.read(summaryRegenerationProvider.notifier);
+
+  /// Starts the run and leaves it alone: it belongs to
+  /// [summaryRegenerationProvider], which this tab watches, so the card keeps
+  /// counting whether or not the sheet is still open when the draft lands.
+  void _regenerate(SummaryBlock block) {
+    final session = _session;
+    if (session == null) return;
+    setState(() => _error = null);
+    unawaited(
+      _regeneration.regenerate(
+        charId: widget.charId,
+        session: session,
+        blockId: block.id,
+      ),
     );
   }
 
-  Future<void> _edit(SummaryBlock block) async {
-    var text = block.content;
-    await FullscreenEditorScreen.show(
-      context,
-      title: _title(block),
-      initialValue: block.content,
-      onChanged: (value) => text = value,
-    );
-    if (text.trim() == block.content.trim()) return;
+  void _stop(SummaryBlock block) {
+    final session = _session;
+    if (session != null) _regeneration.cancel(session.id, block.id);
+  }
+
+  Future<void> _approve(SummaryBlock block) async => _saved(
     await _run(
-      (session) => _generator.editBlock(
-        session: session,
-        blockId: block.id,
-        content: text,
+      (session) => _generator.approveDraft(session: session, blockId: block.id),
+    ),
+    'summary_saved',
+  );
+
+  Future<void> _discardDraft(SummaryBlock block) => _run(
+    (session) => _generator.discardDraft(session: session, blockId: block.id),
+  );
+
+  Future<void> _addNote() async {
+    final text = await SummaryBlockEditorSheet.show(
+      context,
+      title: 'summary_note_add'.tr(),
+      description: 'summary_note_hint'.tr(),
+    );
+    if (text == null) return;
+    _saved(
+      await _run(
+        (session) => _generator.addNote(session: session, content: text),
       ),
+      'summary_saved',
+    );
+  }
+
+  /// Tapping a card edits what it shows: the draft when there is one, as on a
+  /// Memory Books draft, the block otherwise. The sheet is named by the
+  /// messages the block covers, as a memory entry is.
+  Future<void> _edit(SummaryBlock block) async {
+    final draft = block.draft;
+    final current = draft?.content ?? block.content;
+    final text = await SummaryBlockEditorSheet.show(
+      context,
+      title: block.isNote ? _level(block) : _range(block) ?? _level(block),
+      description: block.isNote
+          ? 'summary_note_hint'.tr()
+          : [
+              _level(block),
+              if (draft != null) 'memory_books_badge_draft'.tr(),
+              'summary_tokens_n'.tr(args: ['${draft?.tokens ?? block.tokens}']),
+            ].join(' · '),
+      initialValue: current,
+    );
+    if (text == null || text == current.trim()) return;
+    _saved(
+      await _run(
+        (session) => draft == null
+            ? _generator.editBlock(
+                session: session,
+                blockId: block.id,
+                content: text,
+              )
+            : _generator.editDraft(
+                session: session,
+                blockId: block.id,
+                content: text,
+              ),
+      ),
+      draft == null ? 'summary_saved' : 'summary_draft_saved',
     );
   }
 
@@ -195,17 +265,51 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     return confirmed == true;
   }
 
-  static String _title(SummaryBlock block) => block.isNote
+  static String _level(SummaryBlock block) => block.isNote
       ? 'summary_note'.tr()
       : 'summary_block_level'.tr(args: ['${block.level}']);
+
+  /// The level, and the messages the block covers — "Level 1 · 641-650", as a
+  /// Memory Books row reads "title · range".
+  String _title(SummaryBlock block) => switch (_range(block)) {
+    final range? => '${_level(block)} · $range',
+    null => _level(block),
+  };
+
+  /// The messages [block] covers, numbered as the chat counts them: "641-650",
+  /// the way a Memory Books entry is named. Null for a note, and when none of
+  /// its messages is left.
+  String? _range(SummaryBlock block) {
+    final messages = _session?.messages ?? const <ChatMessage>[];
+    final ids = block.messageIds.toSet();
+    int? first;
+    int? last;
+    for (var i = 0; i < messages.length; i++) {
+      if (!ids.contains(messages[i].id)) continue;
+      first ??= i + 1;
+      last = i + 1;
+    }
+    if (first == null) return null;
+    return first == last ? '$first' : '$first-$last';
+  }
 
   @override
   Widget build(BuildContext context) {
     // Auto-compaction writes from the background; follow it.
     ref.listen(summaryRevisionProvider, (_, _) => _load());
-    final messages =
-        ref.watch(chatProvider(widget.charId)).value?.session?.messages ??
-        const <ChatMessage>[];
+    // A run that fails reports here while the sheet is open, whether or not
+    // it was started from this sheet.
+    ref.listen(summaryRegenerationProvider.select((s) => s.lastFailure), (
+      _,
+      failure,
+    ) {
+      if (failure == null || failure.sessionId != _session?.id) return;
+      setState(() => _error = _describe(failure.error));
+    });
+    final session = ref.watch(chatProvider(widget.charId)).value?.session;
+    final messages = session?.messages ?? const <ChatMessage>[];
+    final regeneration = ref.watch(summaryRegenerationProvider);
+    final regenerating = session != null && regeneration.isBusy(session.id);
     final byId = SummaryChain.index(messages);
     final active = SummaryChain.ordered(_blocks, messages);
     final archived = _blocks.where((b) => b.archived).toList()
@@ -241,10 +345,18 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                     ),
                     const SizedBox(height: 12),
                     for (final block in active)
-                      _BlockCard(
+                      SummaryBlockCard(
+                        key: ValueKey(block.id),
                         block: block,
                         title: _title(block),
                         stale: SummaryChain.isStale(block, byId),
+                        draftStale: switch (block.draft) {
+                          final draft? => SummaryChain.isDraftStale(
+                            draft,
+                            byId,
+                          ),
+                          null => false,
+                        },
                         selected: _selected.contains(block.id),
                         onToggleSelected: block.isNote
                             ? null
@@ -255,6 +367,16 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                               }),
                         onEdit: () => _edit(block),
                         onDelete: () => _delete(block),
+                        onRegenerate: block.isNote
+                            ? null
+                            : () => _regenerate(block),
+                        generatingSince: session == null
+                            ? null
+                            : regeneration.since(session.id, block.id),
+                        onStop: () => _stop(block),
+                        onApprove: () => _approve(block),
+                        onDiscardDraft: () => _discardDraft(block),
+                        busy: _busy || regenerating,
                       ),
                     if (archived.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -265,7 +387,11 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                         subtitle: Text('summary_archive_hint'.tr()),
                         children: [
                           for (final block in archived)
-                            _BlockCard(block: block, title: _title(block)),
+                            SummaryBlockCard(
+                              key: ValueKey(block.id),
+                              block: block,
+                              title: _title(block),
+                            ),
                         ],
                       ),
                     ],
@@ -275,18 +401,20 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                         icon: Icons.delete_sweep_outlined,
                         label: 'summary_clear'.tr(),
                         tone: GlazeActionTone.destructive,
-                        onTap: _busy ? null : _clear,
+                        onTap: _busy || regenerating ? null : _clear,
                       ),
                     ],
                   ],
                 ),
         ),
-        _buildActionBar(context),
+        _buildActionBar(context, regenerating: regenerating),
       ],
     );
   }
 
-  Widget _buildActionBar(BuildContext context) {
+  /// [regenerating]: a block is being written again, which holds the
+  /// summarizer for this chat — compaction and merging wait for it.
+  Widget _buildActionBar(BuildContext context, {required bool regenerating}) {
     final error = _error;
     final canMerge = _selected.length >= 2;
     return Container(
@@ -310,7 +438,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
               tone: GlazeActionTone.primary,
               expand: true,
               busy: _busy,
-              onTap: _mergeSelected,
+              onTap: regenerating ? null : _mergeSelected,
             ),
             const SizedBox(height: 8),
           ],
@@ -327,7 +455,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                       : GlazeActionTone.primary,
                   expand: true,
                   busy: _busy && !canMerge,
-                  onTap: _compact,
+                  onTap: regenerating ? null : _compact,
                 ),
               ),
               const SizedBox(width: 8),
@@ -358,127 +486,4 @@ class _Summary extends StatelessWidget {
     text,
     style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
   );
-}
-
-/// One block. Archived blocks are shown read-only: no selection, no menu.
-class _BlockCard extends StatelessWidget {
-  final SummaryBlock block;
-  final String title;
-  final bool stale;
-  final bool selected;
-  final VoidCallback? onToggleSelected;
-  final VoidCallback? onEdit;
-  final VoidCallback? onDelete;
-
-  const _BlockCard({
-    required this.block,
-    required this.title,
-    this.stale = false,
-    this.selected = false,
-    this.onToggleSelected,
-    this.onEdit,
-    this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.cs;
-    final subtitle = [
-      if (!block.isNote) 'memory_messages_n'.plural(block.messageIds.length),
-      'summary_tokens_n'.tr(args: ['${block.tokens}']),
-      if (block.sourceTokens > 0)
-        'summary_from_tokens_n'.tr(args: ['${block.sourceTokens}']),
-    ].join(' • ');
-    return MemoryRow(
-      accent: stale
-          ? _kOrange
-          : selected
-          ? cs.primary
-          : null,
-      onTap: onEdit,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (onToggleSelected != null) ...[
-                InkResponse(
-                  onTap: onToggleSelected,
-                  radius: 18,
-                  child: Icon(
-                    selected
-                        ? Icons.check_circle_rounded
-                        : Icons.radio_button_unchecked_rounded,
-                    size: 20,
-                    color: selected ? cs.primary : cs.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
-                  ),
-                ),
-              ),
-              if (stale)
-                MemoryStatusIcon(
-                  icon: Icons.build_circle_outlined,
-                  label: 'summary_block_stale'.tr(),
-                  color: _kOrange,
-                ),
-              if (onEdit != null && onDelete != null)
-                MemoryRowMenuButton(
-                  title: title,
-                  itemsBuilder: (menuContext) => [
-                    BottomSheetItem(
-                      icon: Icons.edit_outlined,
-                      label: 'action_edit'.tr(),
-                      onTap: () {
-                        Navigator.of(menuContext, rootNavigator: true).pop();
-                        onEdit!();
-                      },
-                    ),
-                    BottomSheetItem(
-                      icon: Icons.delete_outline,
-                      label: 'btn_delete'.tr(),
-                      isDestructive: true,
-                      onTap: () {
-                        Navigator.of(menuContext, rootNavigator: true).pop();
-                        onDelete!();
-                      },
-                    ),
-                  ],
-                ),
-            ],
-          ),
-          const SizedBox(height: 3),
-          Text(
-            stale ? 'summary_block_stale'.tr() : subtitle,
-            style: TextStyle(
-              fontSize: 11,
-              color: stale
-                  ? _kOrange
-                  : cs.onSurfaceVariant.withValues(alpha: 0.75),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            block.content,
-            maxLines: 6,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.35,
-              color: cs.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

@@ -67,6 +67,33 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  /// Atomically rewrites the block chain from the row as stored now.
+  /// [mutate] gets that row (null when there is none) and returns the new
+  /// chain and the text rendered from it, or null to write nothing — two
+  /// writers can no longer lose each other's change. Returns whether it wrote.
+  Future<bool> mutateBlocks({
+    required String sessionId,
+    required int messageCount,
+    required ({String blocksJson, String content})? Function(ChatSummary? row)
+    mutate,
+  }) => transaction(() async {
+    final existing = await get(sessionId);
+    final next = mutate(existing);
+    if (next == null) return false;
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: next.content,
+        enabled: Value(existing?.enabled ?? true),
+        messageCount: Value(messageCount),
+        prompt: Value(existing?.prompt),
+        updatedAt: Value(currentTimestampSeconds()),
+        blocksJson: Value(next.blocksJson),
+      ),
+    );
+    return true;
+  });
+
   Future<void> putSynced({
     required String sessionId,
     required String content,

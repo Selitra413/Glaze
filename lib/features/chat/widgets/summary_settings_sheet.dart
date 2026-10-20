@@ -5,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/services/memory_prompt_presets.dart'
     show MemoryPromptPreset;
+import '../../../core/services/summary_preamble.dart';
 import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
@@ -76,6 +78,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
 
   SummaryPromptSelection _selection = const SummaryPromptSelection();
 
+  /// The instruction put first in every prompt, for a model that refuses.
+  /// Its switch; the text is in [_preambleText].
+  bool _preambleOn = false;
+  final TextEditingController _preambleText = TextEditingController();
+
   /// The chat's own retelling text, kept from before prompts were chosen by
   /// key. It wins over [_selection] until a preset is picked, which clears it.
   String? _ownPrompt;
@@ -108,6 +115,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _preambleText.dispose();
     super.dispose();
   }
 
@@ -124,6 +132,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       summaryCustomShortenPromptsProvider.future,
     );
     final selection = await ref.read(summaryPromptSelectionProvider.future);
+    final preamble = await ref.read(summaryPreambleProvider.future);
     // The preset list loads lazily; effectivePresetForChatProvider reads null
     // until it resolves, which would leave the injection section hidden.
     await ref.read(presetListProvider.future);
@@ -141,6 +150,8 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       _compaction = compaction;
       _ownPrompt = prompt;
       _selection = selection;
+      _preambleOn = preamble.enabled;
+      _preambleText.text = preamble.text;
       _customPrompts = customPrompts;
       _customMergePrompts = customMergePrompts;
       _loadedMergePrompts = customMergePrompts;
@@ -161,6 +172,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     compaction: _compaction,
     ownPrompt: _ownPrompt,
     selection: _selection,
+    preamble: _preamble,
     role: _role,
     insertionMode: _insertionMode,
     depth: _depth,
@@ -200,6 +212,9 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       await ref
           .read(summaryCompactionSettingsProvider.notifier)
           .save(current.compaction);
+    }
+    if (current.preamble != loaded.preamble) {
+      await ref.read(summaryPreambleProvider.notifier).save(current.preamble);
     }
     if (!identical(_customPrompts, _loadedPrompts)) {
       await ref
@@ -397,6 +412,33 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         description: 'summary_prompt_shorten_hint'.tr(),
                         onTap: _pickShorten,
                       ),
+                      MenuSwitchItem(
+                        key: const Key('summary_preamble'),
+                        label: 'summary_preamble_label'.tr(),
+                        description: 'summary_preamble_hint'.tr(),
+                        value: _preambleOn,
+                        onChanged: (v) => setState(() => _preambleOn = v),
+                      ),
+                      if (_preambleOn)
+                        MenuFieldItem(
+                          fieldKey: const Key('summary_preamble_text'),
+                          label: 'summary_preamble_text_label'.tr(),
+                          controller: _preambleText,
+                          placeholder: SummaryPreamble.defaultText,
+                          keyboardType: TextInputType.multiline,
+                          minLines: 3,
+                          maxLines: 8,
+                          // The reset button shows only while the text differs.
+                          onChanged: (_) => setState(() {}),
+                          onReset:
+                              _preambleText.text == SummaryPreamble.defaultText
+                              ? null
+                              : () => setState(
+                                  () => _preambleText.text =
+                                      SummaryPreamble.defaultText,
+                                ),
+                          onExpand: _expandPreamble,
+                        ),
                       MenuItem(
                         key: const Key('summary_view_current_prompts'),
                         icon: Icons.visibility_outlined,
@@ -453,6 +495,26 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
             ),
     );
   }
+
+  /// The switch and the field as one setting. An emptied field falls back to
+  /// the default text rather than leaving the switch on with nothing behind
+  /// it.
+  SummaryPreamble get _preamble => SummaryPreamble(
+    enabled: _preambleOn,
+    text: _preambleText.text.trim().isEmpty
+        ? SummaryPreamble.defaultText
+        : _preambleText.text,
+  );
+
+  Future<void> _expandPreamble() => FullscreenEditorScreen.show(
+    context,
+    title: 'summary_preamble_label'.tr(),
+    initialValue: _preambleText.text,
+    hintText: SummaryPreamble.defaultText,
+    onChanged: (value) {
+      if (mounted) setState(() => _preambleText.text = value);
+    },
+  );
 
   MemoryPromptPreset _retellPreset() =>
       SummaryPromptPresets.resolve(_selection.retellKey, _customPrompts);
@@ -513,6 +575,13 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     title: 'summary_prompt_view_current'.tr(),
     child: _CurrentPromptsPreview(
       sections: [
+        // First, as it goes in front of each of the prompts below.
+        if (_preamble.active)
+          (
+            title: 'summary_preamble_label'.tr(),
+            label: null,
+            prompt: _preamble.text,
+          ),
         (
           title: 'summary_prompt_retell_label'.tr(),
           label: _ownPrompt != null
@@ -675,6 +744,7 @@ class _SummarySettings {
   final SummaryCompactionSettings compaction;
   final String? ownPrompt;
   final SummaryPromptSelection selection;
+  final SummaryPreamble preamble;
   final String role;
   final String insertionMode;
   final int depth;
@@ -684,15 +754,17 @@ class _SummarySettings {
     required this.compaction,
     required this.ownPrompt,
     required this.selection,
+    required this.preamble,
     required this.role,
     required this.insertionMode,
     required this.depth,
   });
 }
 
-/// The prompts summarizing runs on right now, each under what it is for.
+/// The prompts summarizing runs on right now, each under what it is for and,
+/// when it is a chosen preset, its name.
 class _CurrentPromptsPreview extends StatelessWidget {
-  final List<({String title, String label, String prompt})> sections;
+  final List<({String title, String? label, String prompt})> sections;
 
   const _CurrentPromptsPreview({required this.sections});
 
@@ -712,7 +784,10 @@ class _CurrentPromptsPreview extends StatelessWidget {
                 children: [
                   for (final section in sections) ...[
                     Text(
-                      '${section.title} · ${section.label}',
+                      switch (section.label) {
+                        final label? => '${section.title} · $label',
+                        null => section.title,
+                      },
                       style: TextStyle(
                         color: context.cs.primary,
                         fontSize: 13,

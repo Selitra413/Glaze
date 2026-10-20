@@ -7,7 +7,7 @@ import { MessageUpdateBatcher } from './message_update_batcher.js';
 import { SelectionManager } from './selection_manager.js';
 import { EditController } from './edit_controller.js';
 import { SwipeGestureHandler } from './swipe_gesture_handler.js';
-import { TrackpadScroll } from './trackpad_scroll.js';
+import { ScrollRelay } from './scroll_relay.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
@@ -120,9 +120,10 @@ export class Bridge {
       () => this.isGenerating,
       () => this.disableSwipeRegeneration,
     );
-    // Windows-only fallback path: the embedder never delivers touchpad pans to
-    // WebView2 as wheel events, so Flutter replays them through here.
-    this._trackpadScroll = new TrackpadScroll(() => this.virtualList.container);
+    // Windows-only path: the embedder never delivers touchpad pans to WebView2
+    // as wheel events, and the plugin shrinks mouse-wheel notches, so Flutter
+    // relays both through here.
+    this._scrollRelay = new ScrollRelay(() => this.virtualList.container);
     // Bottom-inset reconciliation state — see setBottomPadding().
     // `_bottomInsetPx` is the inset Flutter measured from the bottom edge of the
     // full-size WebView box (input bar + keyboard/drawer + safe area);
@@ -350,10 +351,35 @@ export class Bridge {
 
   /* ---------- Scroll / load-more ---------- */
 
-  // Windows touchpad pan replayed by Flutter as a wheel at the cursor. See
-  // ./trackpad_scroll.js for why the embedder can't deliver it itself.
+  // Windows touchpad pan relayed by Flutter, a frame's worth in CSS pixels;
+  // evened out and followed a frame or two behind. See ./scroll_relay.js for
+  // why the embedder can't deliver it itself.
   trackpadScroll(dx, dy, x, y) {
-    this._trackpadScroll.scrollBy(dx, dy, x, y);
+    this._scrollRelay.pan(dx, dy, x, y);
+  }
+
+  // The fingers touched the pad: a flick still gliding stops.
+  trackpadScrollStart() {
+    this._scrollRelay.panStart();
+  }
+
+  // The fingers left the pad at (vx, vy) CSS px/s, wheel sign: the chat
+  // carries the motion on and lets it die away, as a Flutter list does.
+  trackpadScrollEnd(vx, vy) {
+    this._scrollRelay.panEnd(vx, vy);
+  }
+
+  // Windows mouse-wheel notch relayed by Flutter, in the CSS pixels a browser
+  // would scroll it; spread over the frames that follow. See ./scroll_relay.js
+  // for why the copy the plugin forwards itself is no use.
+  wheelScroll(dx, dy, x, y) {
+    this._scrollRelay.wheel(dx, dy, x, y);
+  }
+
+  // Flutter relays the mouse wheel through wheelScroll from now on: the
+  // trusted copy the plugin still forwards for every notch is to be dropped.
+  relayNativeWheel(on) {
+    this._scrollRelay.relayNativeWheel(on);
   }
 
   // True while the list is being scrolled by us rather than by the user. The
@@ -592,7 +618,8 @@ export class Bridge {
     }, { passive: true });
 
     // A reader's scroll always has one of these in front of it (the Windows
-    // touchpad is replayed as a synthetic wheel — see TrackpadScroll), so the
+    // touchpad and wheel are replayed as a synthetic wheel — see ScrollRelay),
+    // so the
     // timestamp is the tell between a real upward scroll and a layout
     // correction. Passive: none of them preventDefault.
     for (const type of ['wheel', 'touchstart', 'touchmove', 'keydown']) {
@@ -934,6 +961,10 @@ export class Bridge {
     // remember the current reading position so the batch replace below doesn't
     // yank the chat back to the top/bottom.
     const anchor = preserveScroll ? this.virtualList.captureAnchor() : null;
+    // A chat replaced outright (a session switch, a reopen) starts still: a
+    // notch or a flick left over from the last one would pull the new chat
+    // away from its jump to the bottom.
+    if (!preserveScroll) this._scrollRelay.stop();
     this._panelHost?.closeAll();
     const container = document.getElementById('chat-container') || document.body;
     if (![...container.classList].some(c => c.startsWith('layout-'))) {

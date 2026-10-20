@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../../../core/debug/perf_debug.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import 'cf_challenge_service.dart';
 import 'janitor_lore_budget.dart';
@@ -682,10 +683,20 @@ class JanitorWebViewProxy {
     if (_active || _pending > 0) return;
     if (_webView == null && _starting == null) return;
     _shutdownTimer?.cancel();
-    _shutdownTimer = Timer(const Duration(seconds: 3), () {
+    _shutdownTimer = Timer(_idleShutdownGrace, () {
       if (!_active && _pending == 0) dispose();
     });
   }
+
+  /// How long the WebView outlives the catalog going out of sight.
+  ///
+  /// Tearing a WebView down is native work on the platform thread, which on
+  /// desktop is the thread the UI runs on: a short grace put it three seconds
+  /// after the reader left the character list — right in the middle of the
+  /// chat they had just opened, as a hitch in its loading. Long enough now for
+  /// the chat to be on screen, and short enough that a page left running in
+  /// the background is still gone within the minute.
+  static const _idleShutdownGrace = Duration(seconds: 45);
 
   /// Queues [task] on [_gate], holding the WebView up until it is done.
   Future<T> _enqueue<T>(Future<T> Function() task) {
@@ -2041,7 +2052,10 @@ class JanitorWebViewProxy {
     _starting = null;
     _loadStop = null;
     try {
-      await webView?.dispose();
+      await PerfDebug.slowAwait(
+        'catalog webview teardown',
+        () async => webView?.dispose(),
+      );
     } catch (_) {}
   }
 }

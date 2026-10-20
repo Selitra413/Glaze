@@ -11,6 +11,7 @@ import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/summary_block.dart';
+import '../../../core/services/summary_preamble.dart';
 import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
@@ -142,16 +143,10 @@ class SummaryGenerationService {
         // A block barely smaller than its messages frees nothing.
         if (target * 11 ~/ 10 >= plan.sourceTokens) break;
 
-        final firstSource = messages.indexWhere(
-          (m) => m.id == plan.source.first.id,
-        );
-        final position = {
-          for (var i = 0; i < messages.length; i++) messages[i].id: i,
-        };
-        final earlier = SummaryChain.live(blocks, messages).where(
-          (b) =>
-              b.isNote ||
-              b.messageIds.any((id) => (position[id] ?? -1) < firstSource),
+        final earlier = SummaryChain.liveBefore(
+          blocks,
+          messages,
+          plan.source.first.id,
         );
 
         final text = await service.summarizeMessages(
@@ -166,10 +161,7 @@ class SummaryGenerationService {
           cancelToken: cancelToken,
           temperature: slot.generationTemperature,
         );
-        final tokens = estimateTokens(text);
-        if (tokens >= plan.sourceTokens) {
-          throw const SummaryChainException('not_shorter');
-        }
+        final tokens = _acceptedTokens(text, plan.sourceTokens);
         final ids = [for (final m in plan.source) m.id];
         final block = SummaryBlock(
           id: _newId(),
@@ -231,6 +223,158 @@ class SummaryGenerationService {
         cancelToken: cancelToken,
       );
     });
+  }
+
+  /// Writes an active block again over the same sources, on the prompts
+  /// chosen now, and leaves the result on it as a [SummaryDraft] for the
+  /// reader to approve ([approveDraft]) — the block keeps its text until then.
+  /// A level-1 block retells its messages as they read today, so approving
+  /// brings a stale one back; a merge is merged again from its parts. A merge
+  /// whose messages changed is refused (`stale_merge`): its parts are as out
+  /// of date as it is, and deleting it gives them back. A stopped run
+  /// ([cancelToken]) writes nothing.
+  Future<void> regenerateBlock({
+    required String charId,
+    required ChatSession session,
+    required String blockId,
+    CancelToken? cancelToken,
+  }) {
+    return _exclusive(session.id, () async {
+      final settings = await _ref.read(
+        summaryCompactionSettingsProvider.future,
+      );
+      final slot = _ref.read(pipelineSettingsProvider).memoryBookApi;
+      final apiConfig = await _requireConfig(slot);
+      final service = _ref.read(summaryServiceProvider);
+      final messages = await _messages(session.id, session.messages);
+      final byId = SummaryChain.index(messages);
+      final blocks = await service.getBlocks(session.id);
+      final block = blocks
+          .where((b) => b.id == blockId && !b.archived && !b.isNote)
+          .firstOrNull;
+      if (block == null) throw const SummaryChainException('not_live');
+
+      final String text;
+      final List<String> ids;
+      final int sourceTokens;
+      if (block.childIds.isEmpty) {
+        final source = [
+          for (final id in block.messageIds)
+            if (byId[id] case final message?
+                when SummaryChain.isSummarizable(message))
+              message,
+        ];
+        if (source.isEmpty) throw const SummaryChainException('sources_gone');
+        ids = [for (final m in source) m.id];
+        sourceTokens = source.fold(
+          0,
+          (sum, m) => sum + estimateTokens(m.content),
+        );
+        final earlier = SummaryChain.liveBefore(
+          blocks,
+          messages,
+          ids.first,
+        ).where((b) => b.id != block.id);
+        text = await service.summarizeMessages(
+          sessionId: session.id,
+          source: source,
+          apiConfig: apiConfig,
+          targetTokens: _targetFor(sourceTokens, settings),
+          earlierSummary: SummaryChain.render(earlier),
+          customPrompt: await _retellTemplate(session.id),
+          shortenTemplate: await _shortenTemplate(),
+          macroContext: _macroContext(charId: charId, session: session),
+          cancelToken: cancelToken,
+          temperature: slot.generationTemperature,
+        );
+      } else {
+        if (SummaryChain.isStale(block, byId)) {
+          throw const SummaryChainException('stale_merge');
+        }
+        final parts = [
+          for (final id in block.childIds)
+            ?blocks.where((b) => b.id == id).firstOrNull,
+        ];
+        if (parts.length != block.childIds.length) {
+          throw const SummaryChainException('not_live');
+        }
+        ids = block.messageIds;
+        sourceTokens = parts.fold(0, (sum, b) => sum + b.tokens);
+        text = await service.mergeBlocks(
+          sessionId: session.id,
+          parts: parts,
+          apiConfig: apiConfig,
+          targetTokens: _targetFor(sourceTokens, settings),
+          template: await _mergeTemplate(),
+          shortenTemplate: await _shortenTemplate(),
+          cancelToken: cancelToken,
+          temperature: slot.generationTemperature,
+        );
+      }
+
+      final tokens = _acceptedTokens(text, sourceTokens);
+      final draft = SummaryDraft(
+        content: text,
+        messageIds: ids,
+        sourceHash: SummaryChain.fingerprint(ids, byId),
+        tokens: tokens,
+        sourceTokens: sourceTokens,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      bool stopped() => cancelToken?.isCancelled ?? false;
+      final committed = await _commit(session.id, messages, (current, now) {
+        // Stopped, or edited while the summarizer was writing: the draft
+        // describes messages that no longer read that way.
+        if (stopped() ||
+            SummaryChain.isDraftStale(draft, SummaryChain.index(now))) {
+          return null;
+        }
+        return SummaryChain.putDraft(current, block.id, draft);
+      });
+      if (!committed && !stopped()) {
+        throw const SummaryChainException('changed');
+      }
+    });
+  }
+
+  /// Puts the draft [regenerateBlock] left on [blockId] in place of the
+  /// block's text. Throws `changed` when its messages changed after it was
+  /// written.
+  Future<void> approveDraft({
+    required ChatSession session,
+    required String blockId,
+  }) async {
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, messages) =>
+          SummaryChain.approveDraft(blocks, messages, blockId),
+    );
+  }
+
+  Future<void> editDraft({
+    required ChatSession session,
+    required String blockId,
+    required String content,
+  }) async {
+    if (content.trim().isEmpty) return;
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.editDraft(blocks, blockId, content),
+    );
+  }
+
+  /// Drops the draft of [blockId]; the block keeps the text it has.
+  Future<void> discardDraft({
+    required ChatSession session,
+    required String blockId,
+  }) async {
+    await _commit(
+      session.id,
+      session.messages,
+      (blocks, _) => SummaryChain.putDraft(blocks, blockId, null),
+    );
   }
 
   Future<void> editBlock({
@@ -313,10 +457,7 @@ class SummaryGenerationService {
           cancelToken: cancelToken,
           temperature: temperature,
         );
-    final tokens = estimateTokens(text);
-    if (tokens >= sourceTokens) {
-      throw const SummaryChainException('not_shorter');
-    }
+    final tokens = _acceptedTokens(text, sourceTokens);
     final ids = [for (final part in parts) ...part.messageIds];
     final merged = SummaryBlock(
       id: _newId(),
@@ -338,35 +479,57 @@ class SummaryGenerationService {
     if (!committed) throw const SummaryChainException('changed');
   }
 
+  /// The summarizer's answer as the size of the block it makes. Text no
+  /// shorter than its source frees nothing (`not_shorter`) and is not written.
+  static int _acceptedTokens(String text, int sourceTokens) {
+    final tokens = estimateTokens(text);
+    if (tokens >= sourceTokens) {
+      throw const SummaryChainException('not_shorter');
+    }
+    return tokens;
+  }
+
   /// The chat's own prompt text when it still has one, else the chosen
-  /// retelling preset.
+  /// retelling preset — with the reader's preamble in front when it is on.
   Future<String> _retellTemplate(String sessionId) async {
     final own = await _ref
         .read(summaryServiceProvider)
         .getSummaryPrompt(sessionId);
-    if (own != null) return own;
+    if (own != null) return _withPreamble(own);
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomPromptsProvider.future);
-    return SummaryPromptPresets.resolve(selection.retellKey, custom).prompt;
+    return _withPreamble(
+      SummaryPromptPresets.resolve(selection.retellKey, custom).prompt,
+    );
   }
 
   Future<String> _mergeTemplate() async {
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomMergePromptsProvider.future);
-    return SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt;
+    return _withPreamble(
+      SummaryMergePromptPresets.resolve(selection.mergeKey, custom).prompt,
+    );
   }
 
   Future<String> _shortenTemplate() async {
     final selection = await _ref.read(summaryPromptSelectionProvider.future);
     final custom = await _ref.read(summaryCustomShortenPromptsProvider.future);
-    return SummaryShortenPromptPresets.resolve(
-      selection.shortenKey,
-      custom,
-    ).prompt;
+    return _withPreamble(
+      SummaryShortenPromptPresets.resolve(selection.shortenKey, custom).prompt,
+    );
   }
 
-  /// Reads the blocks and messages fresh, applies [change] and saves. A null
-  /// from [change] skips the write. Returns whether anything was written.
+  /// [template] behind the preamble ([SummaryPreamble]) when the reader has
+  /// it on: first in every summary prompt, so it is read before the prompt it
+  /// is meant to steer. Off, [template] goes as it is.
+  Future<String> _withPreamble(String template) async {
+    final preamble = await _ref.read(summaryPreambleProvider.future);
+    return preamble.apply(template);
+  }
+
+  /// Reads the messages fresh, then applies [change] to the blocks as stored
+  /// and saves them in one transaction. A null from [change] skips the write.
+  /// Returns whether anything was written.
   Future<bool> _commit(
     String sessionId,
     List<ChatMessage> fallbackMessages,
@@ -376,17 +539,16 @@ class SummaryGenerationService {
     )
     change,
   ) async {
-    final service = _ref.read(summaryServiceProvider);
     final messages = await _messages(sessionId, fallbackMessages);
-    final next = change(await service.getBlocks(sessionId), messages);
-    if (next == null) return false;
-    await service.saveBlocks(
-      sessionId: sessionId,
-      blocks: next,
-      messages: messages,
-    );
-    _notifyChanged();
-    return true;
+    final written = await _ref
+        .read(summaryServiceProvider)
+        .mutateBlocks(
+          sessionId: sessionId,
+          messages: messages,
+          change: (blocks) => change(blocks, messages),
+        );
+    if (written) _notifyChanged();
+    return written;
   }
 
   /// Drops stale blocks before anything is planned on top of them.
@@ -394,17 +556,18 @@ class SummaryGenerationService {
     String sessionId,
     List<ChatMessage> messages,
   ) async {
-    final service = _ref.read(summaryServiceProvider);
-    final blocks = await service.getBlocks(sessionId);
-    final cleaned = SummaryChain.withoutStale(blocks, messages);
-    if (!identical(cleaned, blocks)) {
-      await service.saveBlocks(
-        sessionId: sessionId,
-        blocks: cleaned,
-        messages: messages,
-      );
-      _notifyChanged();
-    }
+    var cleaned = const <SummaryBlock>[];
+    final written = await _ref
+        .read(summaryServiceProvider)
+        .mutateBlocks(
+          sessionId: sessionId,
+          messages: messages,
+          change: (blocks) {
+            cleaned = SummaryChain.withoutStale(blocks, messages);
+            return identical(cleaned, blocks) ? null : cleaned;
+          },
+        );
+    if (written) _notifyChanged();
     return cleaned;
   }
 

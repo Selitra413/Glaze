@@ -347,10 +347,13 @@ applied only when it is set, so summarizing otherwise stays at
 ### INV-S2: Summary does not create generation registry entries
 
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
-generation guard. Neither the manual run (`summary_tab.dart`) nor the automatic
-one (`AutoSummaryStage`) passes a `CancelToken`, so once started it cannot be
-aborted. Runs are serialized per session by `SummaryGenerationService`: a second
-run while one is going fails with `SummaryChainException('busy')`.
+generation guard. Neither the manual compaction or merge (`summary_tab.dart`)
+nor the automatic run (`AutoSummaryStage`) passes a `CancelToken`, so once
+started it cannot be aborted. Regenerating one block is the exception: it runs
+in `summaryRegenerationProvider` with a `CancelToken` per block, and a stopped
+run writes nothing. Runs are serialized per session by
+`SummaryGenerationService`: a second run while one is going fails with
+`SummaryChainException('busy')`.
 
 ### INV-S4: Auto-summary is driven by context fill, on a bot turn only
 
@@ -390,8 +393,12 @@ libraries, as in Memory Books (`SummaryPromptSelection`;
 shortening prompt gets `{{target_tokens}}`. Built-ins are
 read-only; a key that names nothing resolves to the built-in default. A chat
 that still holds a prompt text of its own retells with it until a preset is
-picked, which clears it. The transcript is
-the message text alone: summarizing reads nothing from Ledger or Studio and
+picked, which clears it. The reader may put one instruction in front of all
+three prompts (`SummaryPreamble`, `summaryPreambleProvider`; off by default):
+on, `SummaryGenerationService` prepends its text to the resolved retelling,
+merging and shortening prompt alike — a chat's own text included — so it is
+read first; off, the prompts go as chosen and the text is kept. The transcript
+is the message text alone: summarizing reads nothing from Ledger or Studio and
 runs after every bot turn, Studio on or off.
 
 A block whose sources were edited, swiped or deleted is stale: it is not sent,
@@ -400,6 +407,26 @@ with its archive. Deleting a merge restores its parts; deleting a level-1 block
 returns its messages. A row from before blocks reads as one level-0 note that
 covers no messages. Covered by `test/summary_chain_test.dart` and
 `test/summary_service_test.dart`.
+
+Regenerating (`SummaryGenerationService.regenerateBlock`) writes one active
+block again on the prompts chosen now and leaves the result on it as a
+`SummaryDraft`, the way a Memory Books draft waits for approval. The draft is
+never sent: the block keeps its text in the prompt until the reader approves
+the draft (`approveDraft`), which puts it in place — same id, level, parts and
+place in the chain, the draft's sources and fingerprint. The reader may edit
+the draft first or discard it. A level-1 block retells its messages as they
+read today, with the live blocks before it as context, so approving brings a
+stale one back; until then compaction neither drops a stale block whose draft
+is fresh nor retells its messages again (`SummaryChain.awaitsReview`). A merge is merged again from its archived parts; a stale merge
+is refused (`stale_merge`), since its parts are as out of date as it is. Notes
+are never regenerated. The new text must be shorter than its source, and a
+draft whose messages changed after it was written is not approved
+(`changed`). A part merged away loses its draft. Covered by
+`test/summary_regenerate_test.dart`.
+
+Every change to the chain is one transaction over the stored blocks
+(`SummaryRepo.mutateBlocks`), so a draft landing while the reader approves
+another, or while auto-compaction writes, cannot drop either change.
 
 ### INV-S6: Summarized messages are not sent ✅ ENFORCED
 
