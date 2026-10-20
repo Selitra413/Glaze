@@ -109,16 +109,18 @@ test('a jittery pan stream comes out even, and nothing of it is lost', async ({ 
   const moves = await drag(page, deltas);
 
   // Once the filter has settled, the frames move by much the same amount:
-  // the spread of the output, relative to its mean, is well under half the
-  // input's (0.71) — about a tenth of it on a quiet machine, with room for a
-  // frame or two that come late when the suite's other workers are busy.
+  // the spread of the output, relative to its mean, is well under the
+  // input's (0.71) — a third of it on a quiet machine, with room for a frame
+  // or two that come late when the suite's other workers are busy. The
+  // filter is a frame long on purpose; a longer one evened this out further
+  // but trailed the finger.
   const spread = (list) => {
     const mean = list.reduce((a, b) => a + b, 0) / list.length;
     const variance = list.reduce((a, b) => a + (b - mean) ** 2, 0) / list.length;
     return Math.sqrt(variance) / Math.abs(mean);
   };
   const steady = moves.slice(8, 28);
-  expect(spread(steady)).toBeLessThan(spread(deltas) / 2);
+  expect(spread(steady)).toBeLessThan(spread(deltas) * 0.6);
   // And the whole distance arrives.
   const total = deltas.reduce((a, b) => a + b, 0);
   expect(Math.abs((await scrollTop(page)) - (start + total))).toBeLessThan(0.6);

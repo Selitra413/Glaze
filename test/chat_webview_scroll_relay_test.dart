@@ -163,7 +163,7 @@ void main() {
       expect(velocity, Offset.zero);
     });
 
-    testWidgets('coalesces a burst of pan updates to one call per frame', (
+    testWidgets('coalesces a burst of pan updates to one call per batch', (
       tester,
     ) async {
       await tester.pumpWidget(const SizedBox());
@@ -174,7 +174,11 @@ void main() {
       sink.update(_panUpdate(const Offset(0, -5)));
       sink.update(_panUpdate(const Offset(0, -5)));
       sink.update(_panUpdate(const Offset(0, -5)));
-      expect(emitted, isEmpty, reason: 'flush is deferred to the next frame');
+      expect(
+        emitted,
+        isEmpty,
+        reason: 'flush is deferred to the end of the batch',
+      );
 
       await tester.pump();
 
@@ -295,7 +299,7 @@ void main() {
     test('evens a pan out over a frame or two and carries a flick on', () {
       // The embedder's per-frame sums carry the pad's sample jitter, and stop
       // dead when the fingers leave; the page is what smooths and glides.
-      expect(relayJs, contains('export const PAN_SMOOTHING_MS = 40;'));
+      expect(relayJs, contains('export const PAN_SMOOTHING_MS = 20;'));
       // A frame with no pan in it lets the rest out faster: the content
       // stops with the fingers, not a few frames after them.
       expect(relayJs, contains('export const PAN_RELEASE_MS = 12;'));

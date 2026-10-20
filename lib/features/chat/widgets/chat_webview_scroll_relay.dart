@@ -2,19 +2,20 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_bridge_registry.dart';
 
-/// Sums scroll deltas and flushes them at most once per frame.
+/// Sums the scroll deltas of one event batch and flushes them together.
 ///
-/// Pan updates — and the notches of a free-spinning wheel — arrive faster
-/// than the display refreshes, and every emission is a platform-channel round
-/// trip into the WebView, so the deltas are summed and flushed from a
-/// post-frame callback.
+/// The embedder delivers a frame's pan updates — and the notches of a
+/// free-spinning wheel — in one pointer packet, and every emission is a
+/// platform-channel round trip into the WebView, so the deltas are summed and
+/// flushed from a microtask at the end of the batch. Not from a post-frame
+/// callback: that held every pan back by a frame, on top of the round trip
+/// and the page's own frame, and the content trailed the finger.
 ///
 /// For a pan it also keeps the speed of the fingers, the way a Flutter list's
 /// drag does, and reports it when they leave the pad: the embedder's stream
@@ -82,11 +83,10 @@ class ScrollRelaySink {
   void _scheduleFlush() {
     if (_disposed || _flushScheduled) return;
     _flushScheduled = true;
-    SchedulerBinding.instance.addPostFrameCallback((_) {
+    scheduleMicrotask(() {
       _flushScheduled = false;
       flush();
     });
-    SchedulerBinding.instance.scheduleFrame();
   }
 
   @visibleForTesting

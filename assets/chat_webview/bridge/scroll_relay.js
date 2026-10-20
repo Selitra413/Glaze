@@ -49,11 +49,12 @@ export const WHEEL_PIXEL_SCALE = 1;
  * left rather than queue behind it, so a fast spin stays fast. */
 export const WHEEL_SMOOTHING_MS = 70;
 
-/* The same filter for a touchpad pan, with a τ short enough that the content
- * sits only a frame or two behind the finger: a steady finger whose frames
- * come in as 3, 10, 5, 5, 7 px comes out at a near-even 5, and the lag is
- * what a browser's own input resampling costs. */
-export const PAN_SMOOTHING_MS = 40;
+/* The same filter for a touchpad pan, with a τ of about one frame: a steady
+ * finger whose frames come in as 3, 10, 5, 5, 7 px comes out at 5, 8, 6, 6,
+ * 7 — the jitter halved — and the content sits a frame behind the finger,
+ * what a browser's own input resampling costs. 40 ms evened the stream out
+ * further but trailed the finger by two frames more, and that was felt. */
+export const PAN_SMOOTHING_MS = 20;
 
 /* Once a frame brings no pan — the fingers paused or left — what the pan still
  * owes is let out with this constant instead, so the content stops with the
