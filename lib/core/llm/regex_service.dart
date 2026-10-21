@@ -47,6 +47,11 @@ void resetStoppedRegexScripts() => _stoppedScripts.clear();
 
 /// [onScript] is told about each script just before it runs on [text], which
 /// is how the display worker knows which one to blame when time runs out.
+///
+/// [underDeadline] says the caller can interrupt a script that hangs (the
+/// display worker's isolate). The ReDoS heuristic is then not consulted: it
+/// cannot tell a real nested quantifier from a bounded one, and skipping on a
+/// guess silently drops tracker cards that would have run in milliseconds.
 String applyRegexes(
   String text,
   int placementFilter,
@@ -58,6 +63,7 @@ String applyRegexes(
   bool ignoreEphemerality = false,
   List<TriggeredEntry>? triggered,
   void Function(PresetRegex script)? onScript,
+  bool underDeadline = false,
 }) {
   var result = text;
 
@@ -65,11 +71,13 @@ String applyRegexes(
     if (script.disabled) continue;
     if (isRegexScriptStopped(script)) continue;
 
+    // Placement holds in the prompt pass too: ST's prompt-only "saver" scripts
+    // (placement 2, AI output) strip old tracker blocks from past replies, and
+    // run on the preset's own blocks they would cut the very output template
+    // the model is asked to follow.
     final sPlacement = script.placement;
     if (sPlacement.isNotEmpty && !sPlacement.contains(placementFilter)) {
-      if (!(script.promptOnly && isPrompt)) {
-        continue;
-      }
+      continue;
     }
     // ST semantics: "Only Format Display" (markdownOnly) and "Only Format
     // Prompt" (promptOnly) are two independent opt-ins, not one exclusive
@@ -104,7 +112,12 @@ String applyRegexes(
 
     onScript?.call(script);
     final before = result;
-    result = _applySingleScript(result, script, ctx);
+    result = _applySingleScript(
+      result,
+      script,
+      ctx,
+      underDeadline: underDeadline,
+    );
 
     // Mirror Glaze's tracking: a script counts as "triggered" only when it
     // actually changed the text. Used to surface which regex fired on a
@@ -129,8 +142,9 @@ String applyRegexes(
 String _applySingleScript(
   String text,
   PresetRegex script,
-  RegexApplyContext ctx,
-) {
+  RegexApplyContext ctx, {
+  required bool underDeadline,
+}) {
   var processed = text;
 
   var pattern = script.regex;
@@ -172,8 +186,8 @@ String _applySingleScript(
 
   if (pattern.isEmpty) return processed;
 
-  final safety = classifyRegexSafety(pattern);
-  if (safety == RegexSafety.pathological) {
+  if (!underDeadline &&
+      classifyRegexSafety(pattern) == RegexSafety.pathological) {
     debugPrint(
       '[regex] skipping pathological pattern "${script.name}": $pattern',
     );
