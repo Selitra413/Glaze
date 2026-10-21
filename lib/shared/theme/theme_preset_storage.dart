@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../application/sync_theme_store.dart';
 import 'theme_preset.dart';
+import 'tavo_theme_css.dart';
+import 'theme_settings_schema.dart';
 
 /// Themes picked per device brightness, used while [followSystem] is on.
 @immutable
@@ -235,6 +237,12 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
 
     stripped['id'] = id;
     stripped['name'] = name;
+    if (stripped['themeValues'] is! Map<String, dynamic>) {
+      stripped.remove('themeValues');
+    }
+    if (stripped['layoutSettings'] is! String) {
+      stripped.remove('layoutSettings');
+    }
 
     return _withLayout(themePresetFromStoredJson(stripped), json, archive);
   }
@@ -298,7 +306,25 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
         raw['chromeCss'],
         chrome['css'],
       ], preset.layoutChromeCss),
+      layoutSettings:
+          _settingsPart(raw['settings'], archive) ?? preset.layoutSettings,
     );
+  }
+
+  /// The theme's own Chat-screen settings (theme_settings_schema.dart): the
+  /// declaration itself, or the path of a JSON file in the archive. Null
+  /// when the theme declares none; '' when what it declares is unusable.
+  String? _settingsPart(Object? value, Archive? archive) {
+    if (value == null) return null;
+    String? text;
+    if (value is Map || value is List) {
+      text = jsonEncode(value);
+    } else if (value is String) {
+      text = _resolveLayoutText(value, archive);
+    }
+    if (text == null || text.length > _maxLayoutPart) return '';
+    final schema = ThemeSettingsSchema.parse(text);
+    return schema == null || schema.isEmpty ? '' : text;
   }
 
   /// A layout part: the file's text when [value] names a file in [archive],
@@ -307,9 +333,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     final trimmed = value.trim();
     if (trimmed.isEmpty) return null;
     if (archive != null) {
-      final entry =
-          archive.findFile(trimmed.replaceAll('\\', '/')) ??
-          archive.findFile(trimmed.split('/').last);
+      final entry = _findArchiveFile(archive, trimmed);
       if (entry != null && entry.isFile) {
         return utf8.decode(entry.content as List<int>);
       }
@@ -500,6 +524,8 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     final characterFont = _asMap(json['character_bubble_font']);
     final userAvatar = _asMap(json['user_avatar']);
     final characterAvatar = _asMap(json['character_avatar']);
+    final groupUserAvatar = _asMap(json['group_user_avatar']);
+    final groupCharacterAvatar = _asMap(json['group_character_avatar']);
     final bubbleDisplayType = json['bubble_display_type'] as String?;
     final displayMode = json['display_mode'] as String?;
 
@@ -532,6 +558,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       background['image'] as String?,
       archive,
     );
+    final useAvatarBackground = _asBool(background['charAvatar']) ?? false;
     // Tavo stores image visibility; Glaze darkens the background instead.
     final bgOpacity =
         _asDouble(background['imageOpacity']) ??
@@ -585,7 +612,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     final userBubbleRadius = _asDouble(userBubble['radius']) ?? 18;
     final charBubbleRadius = _asDouble(characterBubble['radius']) ?? 18;
 
-    return ThemePreset(
+    var preset = ThemePreset(
       id: id,
       name: name,
       author: 'Tavo',
@@ -618,12 +645,44 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       borderOpacity: borderOpacity,
       userBubbleRadius: userBubbleRadius,
       charBubbleRadius: charBubbleRadius,
-      showUserAvatar: _asBool(userAvatar['avatar']) ?? true,
-      showCharAvatar: _asBool(characterAvatar['avatar']) ?? true,
-      showUserName: _asBool(userAvatar['name']) ?? true,
-      showCharName: _asBool(characterAvatar['name']) ?? true,
+      showUserAvatar:
+          _asBool(userAvatar['avatar']) ??
+          _asBool(groupUserAvatar['avatar']) ??
+          true,
+      showCharAvatar:
+          _asBool(characterAvatar['avatar']) ??
+          _asBool(groupCharacterAvatar['avatar']) ??
+          true,
+      showUserName:
+          _asBool(userAvatar['name']) ??
+          _asBool(groupUserAvatar['name']) ??
+          true,
+      showCharName:
+          _asBool(characterAvatar['name']) ??
+          _asBool(groupCharacterAvatar['name']) ??
+          true,
       bgImage: bgImage,
+      chatBgMode: useAvatarBackground ? 'avatar' : 'inherit',
     );
+
+    // Tavo's own CSS (docs.tavoai.dev/en/guides/theme-development). Its
+    // public selectors exist as aliases on the page, so the rules pass
+    // through after being sorted into the three sheets Glaze has.
+    final customCss = json['custom_css'];
+    if (customCss is String && customCss.trim().isNotEmpty) {
+      final parts = splitTavoCss(
+        customCss,
+        assetUrl: archive == null
+            ? null
+            : (path) => _readArchiveFileAsDataUri(archive, path),
+      );
+      preset = preset.copyWith(
+        layoutCss: parts.page,
+        layoutContentCss: parts.content,
+        layoutChromeCss: parts.chrome,
+      );
+    }
+    return preset;
   }
 
   Map<String, dynamic> _asMap(Object? value) {
@@ -742,13 +801,36 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
   }
 
   String? _readArchiveFileAsDataUri(Archive archive, String path) {
-    final normalized = path.replaceAll('\\', '/');
-    final baseName = normalized.split('/').last;
-    final entry = archive.findFile(normalized) ?? archive.findFile(baseName);
+    final entry = _findArchiveFile(archive, path);
     if (entry == null || !entry.isFile) return null;
     final bytes = entry.content as List<int>;
     final mime = _guessMimeType(entry.name);
     return 'data:$mime;base64,${base64Encode(bytes)}';
+  }
+
+  /// Tavo (and archives made by hand) may spell a path as `theme/assets/x`
+  /// while the ZIP entry is `assets/x`; look the file up by basename too.
+  ArchiveFile? _findArchiveFile(Archive archive, String path) {
+    var normalized = path.trim().replaceAll('\\', '/');
+    try {
+      normalized = Uri.decodeFull(normalized);
+    } catch (_) {
+      // Keep the raw path; findFile below may still match it.
+    }
+    while (normalized.startsWith('./')) {
+      normalized = normalized.substring(2);
+    }
+    final direct =
+        archive.findFile(normalized) ??
+        archive.findFile(normalized.replaceFirst(RegExp(r'^theme/'), ''));
+    if (direct != null) return direct;
+    final baseName = normalized.split('/').last;
+    for (final entry in archive.files) {
+      if (!entry.isFile) continue;
+      final name = entry.name.replaceAll('\\', '/');
+      if (name == baseName || name.endsWith('/$baseName')) return entry;
+    }
+    return null;
   }
 
   String _guessMimeType(String name) {
