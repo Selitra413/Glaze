@@ -464,7 +464,9 @@ class ChatWebViewSyncDispatcher {
   /// page is only now being handed (`ChatNotifier.revealMessageIndex`): the
   /// older messages are prepended by that same queued sync, so the scroll to
   /// the hit has to wait for them too — this time with the scroll, since the
-  /// reader asked to go there.
+  /// reader asked to go there. Only then: the window also grows when the
+  /// reader scrolls up, which renumbers the page's hits under the same
+  /// active one, and pulling the reader back to it would undo the scroll.
   _SearchApply _maybeApplySearch({
     required ChatBridgeController bridge,
     required ChatWebViewWidgetFields old,
@@ -479,7 +481,12 @@ class ChatWebViewSyncDispatcher {
     }
     if (current.visibleStartIndex != old.visibleStartIndex &&
         (current.searchQuery?.isNotEmpty ?? false)) {
-      return _SearchApply.deferredScroll;
+      final moved =
+          current.searchQuery != old.searchQuery ||
+          current.searchActiveIndex != old.searchActiveIndex ||
+          // The hit was waiting outside the window for this.
+          old.searchCurrentIndex < 0;
+      return moved ? _SearchApply.deferredScroll : _SearchApply.deferred;
     }
     applySearch(bridge: bridge, fields: current);
     return _SearchApply.done;
@@ -732,6 +739,7 @@ class ChatWebViewWidgetFields {
     this.blurRegions = const [],
     required this.searchQuery,
     required this.searchCurrentIndex,
+    this.searchActiveIndex = 0,
     this.searchRevision = 0,
     this.visibleStartIndex = 0,
     required this.chatLayout,
@@ -804,6 +812,10 @@ class ChatWebViewWidgetFields {
   /// Bumped when the search matches were recounted over a changed message
   /// list. See [ChatWebViewSyncResult.rehighlightSearch].
   final int searchRevision;
+
+  /// The active hit counted over the whole chat; see
+  /// `ChatWebViewWidget.searchActiveIndex`.
+  final int searchActiveIndex;
 
   /// Where the scrollback window the page holds starts, as an index into the
   /// whole chat. A change widens or narrows the message list the page is

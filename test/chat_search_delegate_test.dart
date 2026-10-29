@@ -45,6 +45,23 @@ void main() {
       delegate.dispose();
     });
 
+    test('a new query starts where the reader is, not at the chat start', () {
+      final delegate = ChatSearchDelegate()..openSearch();
+      delegate.windowStart = 2;
+      delegate.search('foo', messages);
+      // The first hit in the window (m3), not the one in m1.
+      expect(delegate.activeMatch?.messageIndex, 2);
+      expect(delegate.pageMatchIndex(2), 0);
+      // No hit in the window: the newest one before it, the nearest to load.
+      delegate.windowStart = 4;
+      delegate.search('foo', messages);
+      expect(delegate.activeMatch?.messageIndex, 3);
+      delegate.windowStart = 2;
+      delegate.search('none', messages);
+      expect(delegate.activeMatch?.messageIndex, 1);
+      delegate.dispose();
+    });
+
     test('no hits, no active match', () {
       final delegate = ChatSearchDelegate()..openSearch();
       delegate.search('zzz', messages);

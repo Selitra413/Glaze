@@ -107,10 +107,23 @@ class ChatSearchDelegate extends ChangeNotifier {
     search(query, messages);
   }
 
+  /// Where the scrollback window the page holds starts; kept up to date by
+  /// the chat screen. A new query starts on the first hit in that window —
+  /// where the reader is — rather than the first in the whole chat, which on
+  /// a long chat would load all of its history on the first keystroke. With
+  /// no hit in the window it starts on the newest hit before it, the nearest
+  /// one to load.
+  int windowStart = 0;
+
   void search(String query, List<ChatMessage> messages) {
     _searchQuery = query;
     _searchMatches = _collectMatches(query, messages);
-    _searchCurrentIndex = 0;
+    final inWindow = _searchMatches.indexWhere(
+      (m) => m.messageIndex >= windowStart,
+    );
+    _searchCurrentIndex = inWindow >= 0
+        ? inWindow
+        : (_searchMatches.isEmpty ? 0 : _searchMatches.length - 1);
     _countedMessagesSignature = _signatureOf(messages);
     notifyListeners();
   }

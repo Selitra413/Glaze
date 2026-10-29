@@ -98,6 +98,11 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final String? searchQuery;
   final int searchCurrentIndex;
 
+  /// The active hit counted over the whole chat, as the search bar shows it.
+  /// [searchCurrentIndex] is the same hit as the page numbers it; this tells
+  /// the reader moving to a hit apart from the window merely growing.
+  final int searchActiveIndex;
+
   /// Bumped by `ChatSearchDelegate` whenever the match list is recounted over
   /// a changed message list. The query and the active index can both survive
   /// such a recount unchanged while the highlights in the page are stale, so
@@ -196,6 +201,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.chromeChannel,
     this.searchQuery,
     this.searchCurrentIndex = 0,
+    this.searchActiveIndex = 0,
     this.searchRevision = 0,
     this.chatLayout,
     this.themeLayout,
@@ -1187,6 +1193,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
       searchCurrentIndex: w.searchCurrentIndex,
+      searchActiveIndex: w.searchActiveIndex,
       searchRevision: w.searchRevision,
       visibleStartIndex: w.visibleStartIndex,
       chatLayout: w.chatLayout,

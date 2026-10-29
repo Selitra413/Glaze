@@ -369,6 +369,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final charId = widget.charId;
     final chatStateAsync = ref.watch(chatProvider(charId));
     final chatState = chatStateAsync.value;
+    // A plain field, no notify: read only when a query is typed.
+    _search.windowStart = chatState?.visibleStartIndex ?? 0;
     if (chatState != null && !chatState.isGenerating) {
       _scheduleSearchRecount();
     }
@@ -2420,6 +2422,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         searchCurrentIndex: widget.search.pageMatchIndex(
                           widget.state.visibleStartIndex,
                         ),
+                        searchActiveIndex: widget.search.searchCurrentIndex,
                         searchRevision: widget.search.searchRevision,
                       ),
                     ),
