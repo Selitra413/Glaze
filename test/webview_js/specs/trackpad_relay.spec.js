@@ -235,8 +235,28 @@ test('touching the pad stops the glide where it is', async ({ page }) => {
   }, [CURSOR]);
   await page.waitForTimeout(120);
 
-  await page.evaluate(() => window.bridge.trackpadScrollStart());
+  // Read in the same breath as the touch: the glide was still going a moment
+  // before, and nothing of it is left after. Waiting for the chat to rest
+  // alone would prove nothing — a glide that ignored the touch comes to rest
+  // too, only some hundreds of pixels further on.
+  const touch = await page.evaluate(() => {
+    const r = window.bridge._scrollRelay;
+    const c = document.getElementById('chat-container');
+    const gliding = r.flingVelocity.vy !== 0;
+    window.bridge.trackpadScrollStart();
+    return {
+      gliding,
+      velocity: r.flingVelocity.vy,
+      at: c.scrollTop - c.scrollHeight,
+    };
+  });
+  expect(touch.gliding).toBe(true);
+  expect(touch.velocity).toBe(0);
+
+  // At most the last pan, if a busy runner still owed some of it, moves the
+  // chat after the touch.
   const stopped = await rested(page);
+  expect(Math.abs(stopped - touch.at)).toBeLessThanOrEqual(20);
   await page.waitForTimeout(250);
   expect(await where(page)).toBe(stopped);
 });
