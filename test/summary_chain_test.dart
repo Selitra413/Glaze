@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
 
@@ -55,6 +56,56 @@ void main() {
         maxSourceTokens: 100000,
       );
       expect(plan.source.first.id, 'm3');
+      // Everything uncovered outside the tail, the run itself included.
+      expect(plan.remainingMessages, 5);
+    });
+
+    test('the manual tail is a share of the context, or tokens', () {
+      const d = SummaryCompactionSettings();
+      expect(d.manualTailUnit, SummaryManualTailUnit.percent);
+      expect(d.manualTailPercent, 25);
+      expect(d.manualTailBudget(32000), 8000);
+      final tokens = SummaryCompactionSettings.fromJson({
+        'manualTailUnit': 'tokens',
+        'manualTailTokens': 3000,
+      });
+      expect(tokens.manualTailBudget(32000), 3000);
+      expect(SummaryCompactionSettings.fromJson(tokens.toJson()), tokens);
+      // Tokens have no upper bound; a non-positive number is not a tail.
+      expect(
+        SummaryCompactionSettings.fromJson({
+          'manualTailTokens': 1000000,
+        }).manualTailTokens,
+        1000000,
+      );
+      expect(
+        SummaryCompactionSettings.fromJson({
+          'manualTailTokens': 0,
+        }).manualTailTokens,
+        d.manualTailTokens,
+      );
+      // Out-of-range values are clamped, an unknown unit falls back.
+      final odd = SummaryCompactionSettings.fromJson({
+        'manualTailUnit': 'messages',
+        'manualTailPercent': 400,
+      });
+      expect(odd.manualTailUnit, SummaryManualTailUnit.percent);
+      expect(
+        odd.manualTailPercent,
+        SummaryCompactionSettings.maxManualTailPercent,
+      );
+    });
+
+    test('counts what is left beyond the run it capped', () {
+      final messages = _chat(10);
+      final plan = SummaryChain.planSource(
+        blocks: const [],
+        messages: messages,
+        tailBudgetTokens: 0,
+        maxSourceTokens: 1,
+      );
+      expect(plan.source.map((m) => m.id), ['m0']);
+      expect(plan.remainingMessages, 8);
     });
 
     test('a stale block no longer covers its messages', () {

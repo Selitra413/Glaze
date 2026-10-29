@@ -15,6 +15,7 @@ import '../../../shared/widgets/glaze_expansion_tile.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../chat_provider.dart';
 import '../services/summary_generation_service.dart';
+import '../state/summary_compaction_provider.dart';
 import '../state/summary_regeneration_provider.dart';
 import 'summary_block_card.dart';
 import 'summary_block_editor_sheet.dart';
@@ -25,9 +26,12 @@ import 'summary_block_editor_sheet.dart';
 /// of old messages and is sent in their place. The tab lists the active
 /// chain in story order, the archive of merged-away blocks below it, and the
 /// actions that change the chain — compact now, merge a selection, add a note,
-/// write one block again. A block written again comes back as a draft on its
-/// card and replaces the block's text only once approved, the way a Memory
-/// Books draft becomes an entry.
+/// write one block again. Compacting runs in `summaryCompactionProvider`,
+/// block after block until the backlog is retold, with its progress and a
+/// Stop button in the action bar, and goes on when the sheet is closed. A
+/// block written again comes back as a draft on its card and replaces the
+/// block's text only once approved, the way a Memory Books draft becomes an
+/// entry.
 ///
 /// Everything else — the master switch, the template, when compaction runs,
 /// the injection point — is behind the header's settings button, in
@@ -109,6 +113,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       'select_two' => 'summary_error_select_two'.tr(),
       'stale_merge' => 'summary_error_stale_merge'.tr(),
       'sources_gone' => 'summary_error_sources_gone'.tr(),
+      'nothing_to_compact' => 'summary_nothing_to_compact'.tr(),
       _ => 'summary_error_changed'.tr(),
     };
   }
@@ -116,16 +121,25 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   SummaryGenerationService get _generator =>
       ref.read(summaryGenerationServiceProvider);
 
-  Future<void> _compact() => _run((session) async {
-    final result = await _generator.compact(
-      charId: widget.charId,
-      session: session,
-      force: true,
-    );
-    if (!result.changed && mounted) {
-      setState(() => _error = 'summary_nothing_to_compact'.tr());
-    }
-  });
+  SummaryCompactionNotifier get _compaction =>
+      ref.read(summaryCompactionProvider.notifier);
+
+  /// Starts the run and leaves it alone: it belongs to
+  /// [summaryCompactionProvider], which this tab watches, so the blocks keep
+  /// landing and the progress keeps counting whether or not the sheet stays
+  /// open. Each block written bumps `summaryRevisionProvider`, and the list
+  /// follows.
+  void _compact() {
+    final session = _session;
+    if (session == null) return;
+    setState(() => _error = null);
+    unawaited(_compaction.compact(charId: widget.charId, session: session));
+  }
+
+  void _stopCompaction() {
+    final session = _session;
+    if (session != null) _compaction.cancel(session.id);
+  }
 
   Future<void> _mergeSelected() => _run((session) async {
     await _generator.mergeSelected(session: session, blockIds: {..._selected});
@@ -279,9 +293,11 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   /// The messages [block] covers, numbered as the chat counts them: "641-650",
   /// the way a Memory Books entry is named. Null for a note, and when none of
   /// its messages is left.
-  String? _range(SummaryBlock block) {
+  String? _range(SummaryBlock block) => _rangeOf(block.messageIds);
+
+  String? _rangeOf(Iterable<String> messageIds) {
     final messages = _session?.messages ?? const <ChatMessage>[];
-    final ids = block.messageIds.toSet();
+    final ids = messageIds.toSet();
     int? first;
     int? last;
     for (var i = 0; i < messages.length; i++) {
@@ -306,10 +322,22 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       if (failure == null || failure.sessionId != _session?.id) return;
       setState(() => _error = _describe(failure.error));
     });
+    ref.listen(summaryCompactionProvider.select((s) => s.lastFailure), (
+      _,
+      failure,
+    ) {
+      if (failure == null || failure.sessionId != _session?.id) return;
+      setState(() => _error = _describe(failure.error));
+    });
     final session = ref.watch(chatProvider(widget.charId)).value?.session;
     final messages = session?.messages ?? const <ChatMessage>[];
     final regeneration = ref.watch(summaryRegenerationProvider);
     final regenerating = session != null && regeneration.isBusy(session.id);
+    final compacting = session == null
+        ? null
+        : ref.watch(summaryCompactionProvider.select((s) => s.run(session.id)));
+    // The chain is held by one summarizer run at a time, whichever kind.
+    final held = _busy || regenerating || compacting != null;
     final byId = SummaryChain.index(messages);
     final active = SummaryChain.ordered(_blocks, messages);
     final archived = _blocks.where((b) => b.archived).toList()
@@ -376,7 +404,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                         onStop: () => _stop(block),
                         onApprove: () => _approve(block),
                         onDiscardDraft: () => _discardDraft(block),
-                        busy: _busy || regenerating,
+                        busy: held,
                       ),
                     if (archived.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -401,22 +429,32 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                         icon: Icons.delete_sweep_outlined,
                         label: 'summary_clear'.tr(),
                         tone: GlazeActionTone.destructive,
-                        onTap: _busy || regenerating ? null : _clear,
+                        onTap: held ? null : _clear,
                       ),
                     ],
                   ],
                 ),
         ),
-        _buildActionBar(context, regenerating: regenerating),
+        _buildActionBar(
+          context,
+          regenerating: regenerating,
+          compacting: compacting,
+        ),
       ],
     );
   }
 
   /// [regenerating]: a block is being written again, which holds the
   /// summarizer for this chat — compaction and merging wait for it.
-  Widget _buildActionBar(BuildContext context, {required bool regenerating}) {
+  /// [compacting]: the compaction under way, if any; the bar then shows where
+  /// it stands and offers Stop in place of Compact.
+  Widget _buildActionBar(
+    BuildContext context, {
+    required bool regenerating,
+    required SummaryCompactionRun? compacting,
+  }) {
     final error = _error;
-    final canMerge = _selected.length >= 2;
+    final canMerge = _selected.length >= 2 && compacting == null;
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -442,27 +480,45 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
             ),
             const SizedBox(height: 8),
           ],
+          if (compacting != null) ...[
+            _CompactionProgress(
+              run: compacting,
+              range: _rangeOf(compacting.progress.sourceIds),
+            ),
+            const SizedBox(height: 8),
+          ],
           Row(
             children: [
               Expanded(
-                child: GlazeActionButton(
-                  icon: Icons.compress_rounded,
-                  label: _busy
-                      ? 'summary_generating'.tr()
-                      : 'summary_compact_now'.tr(),
-                  tone: canMerge
-                      ? GlazeActionTone.neutral
-                      : GlazeActionTone.primary,
-                  expand: true,
-                  busy: _busy && !canMerge,
-                  onTap: regenerating ? null : _compact,
-                ),
+                child: compacting != null
+                    ? GlazeActionButton(
+                        icon: Icons.stop_rounded,
+                        label: compacting.stopping
+                            ? 'summary_compact_stopping'.tr()
+                            : 'summary_compact_stop'.tr(),
+                        tone: GlazeActionTone.primary,
+                        expand: true,
+                        busy: compacting.stopping,
+                        onTap: _stopCompaction,
+                      )
+                    : GlazeActionButton(
+                        icon: Icons.compress_rounded,
+                        label: _busy
+                            ? 'summary_generating'.tr()
+                            : 'summary_compact_now'.tr(),
+                        tone: canMerge
+                            ? GlazeActionTone.neutral
+                            : GlazeActionTone.primary,
+                        expand: true,
+                        busy: _busy && !canMerge,
+                        onTap: regenerating ? null : _compact,
+                      ),
               ),
               const SizedBox(width: 8),
               GlazeActionButton(
                 icon: Icons.note_add_outlined,
                 label: 'summary_note_add'.tr(),
-                onTap: _busy ? null : _addNote,
+                onTap: _busy || compacting != null ? null : _addNote,
               ),
             ],
           ),
@@ -472,6 +528,54 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Where the compaction stands: which block is being written over which
+/// messages, how many messages are still ahead, and the seconds elapsed.
+class _CompactionProgress extends StatelessWidget {
+  final SummaryCompactionRun run;
+
+  /// The messages being retold, numbered as the chat counts them.
+  final String? range;
+
+  const _CompactionProgress({required this.run, required this.range});
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = run.progress;
+    final retelling = !progress.merging && progress.sourceIds.isNotEmpty;
+    final step = progress.merging
+        ? 'summary_compacting_merge'.tr()
+        : !retelling
+        // Planning the first request: nothing to name yet.
+        ? 'summary_generating'.tr()
+        : 'summary_compacting_retell'.tr(
+            namedArgs: {'n': '${progress.created + 1}', 'range': range ?? ''},
+          );
+    final style = TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(step, style: style),
+              if (retelling)
+                Text(
+                  'summary_compacting_left_n'.plural(
+                    progress.remainingMessages,
+                  ),
+                  style: style,
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        SummaryElapsedLabel(since: run.startedAt),
+      ],
     );
   }
 }

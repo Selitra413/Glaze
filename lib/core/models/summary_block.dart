@@ -267,10 +267,15 @@ class SummarySourcePlan {
   /// Tokens of the fresh tail that stays as raw history.
   final int tailTokens;
 
+  /// Summarizable messages outside the tail that no live block covers,
+  /// [source] included: what is left to retell, counted in messages.
+  final int remainingMessages;
+
   const SummarySourcePlan({
     required this.source,
     required this.sourceTokens,
     required this.tailTokens,
+    this.remainingMessages = 0,
   });
 }
 
@@ -522,6 +527,9 @@ class SummaryChain {
   /// Summarizable messages outside the fresh tail that no live block covers:
   /// the oldest unbroken run of them, capped at [maxSourceTokens] (always at
   /// least one message).
+  ///
+  /// The tail is the newest messages that fit [tailBudgetTokens], never fewer
+  /// than [minTailMessages].
   static SummarySourcePlan planSource({
     required List<SummaryBlock> blocks,
     required List<ChatMessage> messages,
@@ -551,15 +559,22 @@ class SummaryChain {
     };
     final source = <ChatMessage>[];
     var sourceTokens = 0;
+    var remaining = 0;
+    var open = true;
     for (final message in eligible.take(split)) {
       if (covered.contains(message.id)) {
         // The run ends where a block begins, so a new block never straddles
         // an existing one.
-        if (source.isNotEmpty) break;
+        if (source.isNotEmpty) open = false;
         continue;
       }
+      remaining++;
+      if (!open) continue;
       final tokens = estimateTokens(message.content);
-      if (source.isNotEmpty && sourceTokens + tokens > maxSourceTokens) break;
+      if (source.isNotEmpty && sourceTokens + tokens > maxSourceTokens) {
+        open = false;
+        continue;
+      }
       source.add(message);
       sourceTokens += tokens;
     }
@@ -567,6 +582,7 @@ class SummaryChain {
       source: source,
       sourceTokens: sourceTokens,
       tailTokens: tailTokens,
+      remainingMessages: remaining,
     );
   }
 

@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/preset.dart';
@@ -83,6 +84,9 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   bool _preambleOn = false;
   final TextEditingController _preambleText = TextEditingController();
 
+  /// The manual tail in tokens, typed; [_compaction] follows every valid edit.
+  final TextEditingController _tailTokens = TextEditingController();
+
   /// The chat's own retelling text, kept from before prompts were chosen by
   /// key. It wins over [_selection] until a preset is picked, which clears it.
   String? _ownPrompt;
@@ -116,6 +120,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   void dispose() {
     _scrollController.dispose();
     _preambleText.dispose();
+    _tailTokens.dispose();
     super.dispose();
   }
 
@@ -148,6 +153,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     setState(() {
       _enabled = enabled;
       _compaction = compaction;
+      _tailTokens.text = '${compaction.manualTailTokens}';
       _ownPrompt = prompt;
       _selection = selection;
       _preambleOn = preamble.enabled;
@@ -270,6 +276,31 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         .updatePreset(preset.copyWith(blocks: blocks));
   }
 
+  static String _tailUnitLabel(SummaryManualTailUnit unit) => switch (unit) {
+    SummaryManualTailUnit.percent => 'summary_manual_tail_unit_percent'.tr(),
+    SummaryManualTailUnit.tokens => 'summary_manual_tail_unit_tokens'.tr(),
+  };
+
+  void _pickTailUnit() {
+    showGlazePickerSheet(
+      context,
+      title: 'summary_manual_tail_label'.tr(),
+      items: [
+        for (final unit in SummaryManualTailUnit.values)
+          GlazePickerItem(
+            label: _tailUnitLabel(unit),
+            isActive: unit == _compaction.manualTailUnit,
+            value: unit,
+          ),
+      ],
+      onSelect: (value) => setState(
+        () => _compaction = _compaction.copyWith(
+          manualTailUnit: value as SummaryManualTailUnit,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SheetView(
@@ -339,6 +370,58 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                           ),
                         ),
                       ),
+                      MenuSelectorItem(
+                        label: 'summary_manual_tail_label'.tr(),
+                        description: 'summary_manual_tail_hint'.tr(),
+                        currentValue: _tailUnitLabel(
+                          _compaction.manualTailUnit,
+                        ),
+                        onTap: _pickTailUnit,
+                      ),
+                      if (_compaction.manualTailUnit ==
+                          SummaryManualTailUnit.percent)
+                        MenuRangeItem(
+                          label: 'summary_manual_tail_percent_label'.tr(),
+                          unit: '%',
+                          description: 'summary_manual_tail_percent_hint'.tr(),
+                          value: _compaction.manualTailPercent.toDouble(),
+                          min: SummaryCompactionSettings.minManualTailPercent
+                              .toDouble(),
+                          max: SummaryCompactionSettings.maxManualTailPercent
+                              .toDouble(),
+                          divisions:
+                              SummaryCompactionSettings.maxManualTailPercent -
+                              SummaryCompactionSettings.minManualTailPercent,
+                          decimalPlaces: 0,
+                          editableValue: true,
+                          onChanged: (v) => setState(
+                            () => _compaction = _compaction.copyWith(
+                              manualTailPercent: v.round(),
+                            ),
+                          ),
+                        )
+                      else
+                        MenuFieldItem(
+                          label: 'summary_manual_tail_tokens_label'.tr(),
+                          description: 'summary_manual_tail_tokens_hint'.tr(),
+                          controller: _tailTokens,
+                          placeholder:
+                              '${const SummaryCompactionSettings().manualTailTokens}',
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          // An empty or zero field keeps the last number.
+                          onChanged: (text) {
+                            final v = int.tryParse(text) ?? 0;
+                            if (v < 1) return;
+                            setState(
+                              () => _compaction = _compaction.copyWith(
+                                manualTailTokens: v,
+                              ),
+                            );
+                          },
+                        ),
                       MenuRangeItem(
                         label: 'summary_block_target_label'.tr(),
                         description: 'summary_block_target_hint'.tr(),

@@ -371,13 +371,15 @@ applied only when it is set, so summarizing otherwise stays at
 ### INV-S2: Summary does not create generation registry entries
 
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
-generation guard. Neither the manual compaction or merge (`summary_tab.dart`)
-nor the automatic run (`AutoSummaryStage`) passes a `CancelToken`, so once
-started it cannot be aborted. Regenerating one block is the exception: it runs
-in `summaryRegenerationProvider` with a `CancelToken` per block, and a stopped
-run writes nothing. Runs are serialized per session by
-`SummaryGenerationService`: a second run while one is going fails with
-`SummaryChainException('busy')`.
+generation guard. Neither the manual merge (`summary_tab.dart`) nor the
+automatic run (`AutoSummaryStage`) passes a `CancelToken`, so once started it
+cannot be aborted. The manual compaction runs in `summaryCompactionProvider`
+with a `CancelToken` per session: Stop ends it after the block being written,
+and every block already written stays. Regenerating one block runs in
+`summaryRegenerationProvider` with a `CancelToken` per block, and a stopped
+run writes nothing. Both outlive the Memory sheet. Runs are serialized per
+session by `SummaryGenerationService`: a second run while one is going fails
+with `SummaryChainException('busy')`.
 
 ### INV-S4: Auto-summary is driven by context fill, on a bot turn only
 
@@ -396,6 +398,16 @@ shorter text kept; a block that still
 comes back no shorter than its source is rejected. Once the live
 blocks take more than `mergePercent` of the window, adjacent blocks of one
 level are merged a level up and the merged ones are archived.
+
+An automatic run makes at most `SummaryGenerationService._maxSteps` blocks, so
+it never holds the next turn for long; the manual run ("Compact history") has
+no such cap and goes on, one block per request, until nothing older than the
+fresh tail is left uncovered — a long chat's whole backlog in one press. Its
+tail is its own setting, not the rest of the window: a share of the chat
+connection's context size (`manualTailPercent`, 25 % by default) or a fixed
+number of tokens (`manualTailTokens`), as `manualTailUnit` says. The reader
+compacts up to nearly now and plays on from there. Any run gives up after `_maxIdleSteps` steps in a row
+that wrote nothing because the chat was edited under them.
 
 ### INV-S5: The summary is a chain of blocks bound to their messages ✅ ENFORCED
 
