@@ -270,6 +270,31 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         .updatePreset(preset.copyWith(blocks: blocks));
   }
 
+  static String _tailUnitLabel(SummaryManualTailUnit unit) => switch (unit) {
+    SummaryManualTailUnit.percent => 'summary_manual_tail_unit_percent'.tr(),
+    SummaryManualTailUnit.tokens => 'summary_manual_tail_unit_tokens'.tr(),
+  };
+
+  void _pickTailUnit() {
+    showGlazePickerSheet(
+      context,
+      title: 'summary_manual_tail_label'.tr(),
+      items: [
+        for (final unit in SummaryManualTailUnit.values)
+          GlazePickerItem(
+            label: _tailUnitLabel(unit),
+            isActive: unit == _compaction.manualTailUnit,
+            value: unit,
+          ),
+      ],
+      onSelect: (value) => setState(
+        () => _compaction = _compaction.copyWith(
+          manualTailUnit: value as SummaryManualTailUnit,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SheetView(
@@ -339,25 +364,59 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                           ),
                         ),
                       ),
-                      MenuRangeItem(
+                      MenuSelectorItem(
                         label: 'summary_manual_tail_label'.tr(),
                         description: 'summary_manual_tail_hint'.tr(),
-                        value: _compaction.manualTailMessages.toDouble(),
-                        min: SummaryCompactionSettings.minManualTailMessages
-                            .toDouble(),
-                        max: SummaryCompactionSettings.maxManualTailMessages
-                            .toDouble(),
-                        divisions:
-                            SummaryCompactionSettings.maxManualTailMessages -
-                            SummaryCompactionSettings.minManualTailMessages,
-                        decimalPlaces: 0,
-                        editableValue: true,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            manualTailMessages: v.round(),
+                        currentValue: _tailUnitLabel(
+                          _compaction.manualTailUnit,
+                        ),
+                        onTap: _pickTailUnit,
+                      ),
+                      if (_compaction.manualTailUnit ==
+                          SummaryManualTailUnit.percent)
+                        MenuRangeItem(
+                          label: 'summary_manual_tail_percent_label'.tr(),
+                          unit: '%',
+                          description: 'summary_manual_tail_percent_hint'.tr(),
+                          value: _compaction.manualTailPercent.toDouble(),
+                          min: SummaryCompactionSettings.minManualTailPercent
+                              .toDouble(),
+                          max: SummaryCompactionSettings.maxManualTailPercent
+                              .toDouble(),
+                          divisions:
+                              SummaryCompactionSettings.maxManualTailPercent -
+                              SummaryCompactionSettings.minManualTailPercent,
+                          decimalPlaces: 0,
+                          editableValue: true,
+                          onChanged: (v) => setState(
+                            () => _compaction = _compaction.copyWith(
+                              manualTailPercent: v.round(),
+                            ),
+                          ),
+                        )
+                      else
+                        MenuRangeItem(
+                          label: 'summary_manual_tail_tokens_label'.tr(),
+                          description: 'summary_manual_tail_tokens_hint'.tr(),
+                          value: _compaction.manualTailTokens.toDouble(),
+                          min: SummaryCompactionSettings.minManualTailTokens
+                              .toDouble(),
+                          max: SummaryCompactionSettings.maxManualTailTokens
+                              .toDouble(),
+                          // Steps of 500 tokens; the field takes any number.
+                          divisions:
+                              (SummaryCompactionSettings.maxManualTailTokens -
+                                  SummaryCompactionSettings
+                                      .minManualTailTokens) ~/
+                              500,
+                          decimalPlaces: 0,
+                          editableValue: true,
+                          onChanged: (v) => setState(
+                            () => _compaction = _compaction.copyWith(
+                              manualTailTokens: v.round(),
+                            ),
                           ),
                         ),
-                      ),
                       MenuRangeItem(
                         label: 'summary_block_target_label'.tr(),
                         description: 'summary_block_target_hint'.tr(),

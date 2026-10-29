@@ -83,10 +83,12 @@ final _session = ChatSession(
 typedef _Harness = ({ProviderContainer container, _RecordingAuxLlmClient llm});
 
 Future<_Harness> _harness({MemoryBookApiSettings? slot}) async {
-  // A manual run keeps the newest `manualTailMessages` as raw history; the
-  // default would keep this whole short chat.
+  // A manual run keeps a quarter of the context as raw history by default,
+  // which would keep this whole short chat; the smallest token tail leaves
+  // the two newest messages.
   SharedPreferences.setMockInitialValues({
-    'summaryCompaction': '{"manualTailMessages": 2}',
+    'summaryCompaction':
+        '{"manualTailUnit": "tokens", "manualTailTokens": 500}',
   });
   final db = AppDatabase.forTesting(NativeDatabase.memory());
   final llm = _RecordingAuxLlmClient();

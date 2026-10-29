@@ -528,27 +528,21 @@ class SummaryChain {
   /// the oldest unbroken run of them, capped at [maxSourceTokens] (always at
   /// least one message).
   ///
-  /// The tail is the newest messages that fit [tailBudgetTokens], or exactly
-  /// the newest [tailMessages] when that is given — a manual run keeps a
-  /// count, not a share of the window. Never fewer than [minTailMessages].
+  /// The tail is the newest messages that fit [tailBudgetTokens], never fewer
+  /// than [minTailMessages].
   static SummarySourcePlan planSource({
     required List<SummaryBlock> blocks,
     required List<ChatMessage> messages,
     required int tailBudgetTokens,
     required int maxSourceTokens,
-    int? tailMessages,
   }) {
     final eligible = messages.where(isSummarizable).toList();
     var tailTokens = 0;
     var split = eligible.length;
     for (var i = eligible.length - 1; i >= 0; i--) {
       final tokens = estimateTokens(eligible[i].content);
-      final kept = eligible.length - i;
-      final mustKeep = kept <= minTailMessages;
-      final fits = tailMessages != null
-          ? kept <= tailMessages
-          : tailTokens + tokens <= tailBudgetTokens;
-      if (!mustKeep && !fits) break;
+      final mustKeep = eligible.length - i <= minTailMessages;
+      if (!mustKeep && tailTokens + tokens > tailBudgetTokens) break;
       tailTokens += tokens;
       split = i;
     }

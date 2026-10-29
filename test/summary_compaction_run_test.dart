@@ -11,7 +11,7 @@ import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart'
-    show SummaryBlock, SummaryChainException;
+    show SummaryBlock, SummaryChain, SummaryChainException;
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/features/chat/services/summary_generation_service.dart';
@@ -105,9 +105,10 @@ Future<List<SummaryBlock>> _blocks(ProviderContainer container) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  // Everything but the newest messages a manual run keeps as raw history.
-  final expectedBlocks =
-      _messageCount - const SummaryCompactionSettings().manualTailMessages;
+  // Everything but the manual tail: a quarter of the 4000-token context is
+  // less than one of these messages, so the tail is the two newest messages
+  // every tail keeps.
+  final expectedBlocks = _messageCount - SummaryChain.minTailMessages;
 
   test(
     'a forced run retells the whole backlog, past the automatic cap',

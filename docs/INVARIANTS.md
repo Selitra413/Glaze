@@ -403,9 +403,10 @@ An automatic run makes at most `SummaryGenerationService._maxSteps` blocks, so
 it never holds the next turn for long; the manual run ("Compact history") has
 no such cap and goes on, one block per request, until nothing older than the
 fresh tail is left uncovered — a long chat's whole backlog in one press. Its
-tail is a count, `SummaryCompactionSettings.manualTailMessages` newest
-messages, not the rest of the window: the reader compacts up to nearly now and
-plays on from there. Any run gives up after `_maxIdleSteps` steps in a row
+tail is its own setting, not the rest of the window: a share of the chat
+connection's context size (`manualTailPercent`, 25 % by default) or a fixed
+number of tokens (`manualTailTokens`), as `manualTailUnit` says. The reader
+compacts up to nearly now and plays on from there. Any run gives up after `_maxIdleSteps` steps in a row
 that wrote nothing because the chat was edited under them.
 
 ### INV-S5: The summary is a chain of blocks bound to their messages ✅ ENFORCED

@@ -357,6 +357,11 @@ void main() {
     expect(find.text('summary_auto_label'.tr()), findsOneWidget);
     expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
     expect(find.text('summary_manual_tail_label'.tr()), findsOneWidget);
+    // The manual tail is a share of the context by default; the token slider
+    // shows only once tokens are picked.
+    expect(find.text('summary_manual_tail_unit_percent'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_percent_label'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_tokens_label'.tr()), findsNothing);
     expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
     expect(find.text('summary_merge_label'.tr()), findsOneWidget);
     // Summarizing runs on the Memory slot, so the settings say where that

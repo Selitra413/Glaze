@@ -95,8 +95,8 @@ class SummaryGenerationService {
   static const _maxIdleSteps = 3;
 
   /// Compacts [session] until the prompt is back under the trigger. [force]
-  /// ignores the trigger and the minimum run size, keeps only the newest
-  /// `manualTailMessages` as raw history rather than the rest of the window,
+  /// ignores the trigger and the minimum run size, keeps only the manual tail
+  /// (`manualTailBudget`) as raw history rather than the rest of the window,
   /// and keeps going, one block at a time, until everything older is
   /// summarized — the whole backlog of a long chat, however many blocks it
   /// takes.
@@ -179,9 +179,10 @@ class SummaryGenerationService {
         final plan = SummaryChain.planSource(
           blocks: blocks,
           messages: messages,
-          tailBudgetTokens: budget.total - triggerTokens,
+          tailBudgetTokens: force
+              ? settings.manualTailBudget(_contextSize(budget))
+              : budget.total - triggerTokens,
           maxSourceTokens: inputCap,
-          tailMessages: force ? settings.manualTailMessages : null,
         );
         if (plan.source.isEmpty) break;
         final overflow = used > budget.total;
@@ -678,6 +679,13 @@ class SummaryGenerationService {
     final chat = _ref.read(activeApiConfigProvider);
     final total = chat == null ? 0 : chat.contextSize - chat.maxTokens;
     return _PromptBudget(total: total > 0 ? total : 32000, fixedTokens: 0);
+  }
+
+  /// The chat connection's context size, which a manual tail in percent is a
+  /// share of; the prompt budget when no connection is set.
+  int _contextSize(_PromptBudget budget) {
+    final size = _ref.read(activeApiConfigProvider)?.contextSize ?? 0;
+    return size > 0 ? size : budget.total;
   }
 
   /// How much transcript one summarizer request may carry: its window, less

@@ -18,6 +18,9 @@ final summaryServiceProvider = Provider<SummaryService>((ref) {
   return SummaryService(ref.watch(summaryRepoProvider));
 });
 
+/// What the manual tail is counted in.
+enum SummaryManualTailUnit { percent, tokens }
+
 /// When and how big the summary compacts. Global, not per chat.
 class SummaryCompactionSettings {
   /// Compact on its own after a bot reply once the prompt is full enough.
@@ -35,18 +38,29 @@ class SummaryCompactionSettings {
   /// blocks are merged a level up.
   final int mergePercent;
 
-  /// How many of the newest messages a manual run ("Compact history") leaves
-  /// as raw history. The automatic run keeps the rest of the window instead
+  /// How a manual run ("Compact history") sizes the newest history it leaves
+  /// as is: a share of the chat connection's context size, or a fixed number
+  /// of tokens. The automatic run keeps the rest of the window instead
   /// ([triggerPercent]); a reader compacting by hand wants the summary brought
   /// up to nearly now, and plays on from there.
-  final int manualTailMessages;
+  final SummaryManualTailUnit manualTailUnit;
+
+  /// The manual tail in percent of the context size, when
+  /// [manualTailUnit] is [SummaryManualTailUnit.percent].
+  final int manualTailPercent;
+
+  /// The manual tail in tokens, when [manualTailUnit] is
+  /// [SummaryManualTailUnit.tokens].
+  final int manualTailTokens;
 
   const SummaryCompactionSettings({
     this.autoEnabled = false,
     this.triggerPercent = 75,
     this.blockTargetTokens = 1000,
     this.mergePercent = 20,
-    this.manualTailMessages = 10,
+    this.manualTailUnit = SummaryManualTailUnit.percent,
+    this.manualTailPercent = 25,
+    this.manualTailTokens = 8000,
   });
 
   static const minTriggerPercent = 50;
@@ -55,21 +69,34 @@ class SummaryCompactionSettings {
   static const maxBlockTargetTokens = 4000;
   static const minMergePercent = 5;
   static const maxMergePercent = 50;
-  static const minManualTailMessages = 2;
-  static const maxManualTailMessages = 100;
+  static const minManualTailPercent = 5;
+  static const maxManualTailPercent = 90;
+  static const minManualTailTokens = 500;
+  static const maxManualTailTokens = 200000;
+
+  /// Tokens of raw history a manual run keeps for a chat connection with
+  /// [contextSize] tokens of context.
+  int manualTailBudget(int contextSize) =>
+      manualTailUnit == SummaryManualTailUnit.tokens
+      ? manualTailTokens
+      : contextSize * manualTailPercent ~/ 100;
 
   SummaryCompactionSettings copyWith({
     bool? autoEnabled,
     int? triggerPercent,
     int? blockTargetTokens,
     int? mergePercent,
-    int? manualTailMessages,
+    SummaryManualTailUnit? manualTailUnit,
+    int? manualTailPercent,
+    int? manualTailTokens,
   }) => SummaryCompactionSettings(
     autoEnabled: autoEnabled ?? this.autoEnabled,
     triggerPercent: triggerPercent ?? this.triggerPercent,
     blockTargetTokens: blockTargetTokens ?? this.blockTargetTokens,
     mergePercent: mergePercent ?? this.mergePercent,
-    manualTailMessages: manualTailMessages ?? this.manualTailMessages,
+    manualTailUnit: manualTailUnit ?? this.manualTailUnit,
+    manualTailPercent: manualTailPercent ?? this.manualTailPercent,
+    manualTailTokens: manualTailTokens ?? this.manualTailTokens,
   );
 
   Map<String, dynamic> toJson() => {
@@ -77,7 +104,9 @@ class SummaryCompactionSettings {
     'triggerPercent': triggerPercent,
     'blockTargetTokens': blockTargetTokens,
     'mergePercent': mergePercent,
-    'manualTailMessages': manualTailMessages,
+    'manualTailUnit': manualTailUnit.name,
+    'manualTailPercent': manualTailPercent,
+    'manualTailTokens': manualTailTokens,
   };
 
   factory SummaryCompactionSettings.fromJson(Map<String, dynamic> json) {
@@ -107,11 +136,20 @@ class SummaryCompactionSettings {
         minMergePercent,
         maxMergePercent,
       ),
-      manualTailMessages: read(
-        'manualTailMessages',
-        d.manualTailMessages,
-        minManualTailMessages,
-        maxManualTailMessages,
+      manualTailUnit: json['manualTailUnit'] == 'tokens'
+          ? SummaryManualTailUnit.tokens
+          : SummaryManualTailUnit.percent,
+      manualTailPercent: read(
+        'manualTailPercent',
+        d.manualTailPercent,
+        minManualTailPercent,
+        maxManualTailPercent,
+      ),
+      manualTailTokens: read(
+        'manualTailTokens',
+        d.manualTailTokens,
+        minManualTailTokens,
+        maxManualTailTokens,
       ),
     );
   }
@@ -123,7 +161,9 @@ class SummaryCompactionSettings {
       other.triggerPercent == triggerPercent &&
       other.blockTargetTokens == blockTargetTokens &&
       other.mergePercent == mergePercent &&
-      other.manualTailMessages == manualTailMessages;
+      other.manualTailUnit == manualTailUnit &&
+      other.manualTailPercent == manualTailPercent &&
+      other.manualTailTokens == manualTailTokens;
 
   @override
   int get hashCode => Object.hash(
@@ -131,7 +171,9 @@ class SummaryCompactionSettings {
     triggerPercent,
     blockTargetTokens,
     mergePercent,
-    manualTailMessages,
+    manualTailUnit,
+    manualTailPercent,
+    manualTailTokens,
   );
 }
 

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/state/summary_providers.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
 
@@ -59,26 +60,26 @@ void main() {
       expect(plan.remainingMessages, 5);
     });
 
-    test('a message count as the tail ignores the token budget', () {
-      final messages = _chat(10);
-      final plan = SummaryChain.planSource(
-        blocks: const [],
-        messages: messages,
-        tailBudgetTokens: 100000,
-        maxSourceTokens: 100000,
-        tailMessages: 3,
-      );
-      expect(plan.source.map((m) => m.id), [for (var i = 0; i < 7; i++) 'm$i']);
-      // Never below the two newest messages, whatever the count says.
+    test('the manual tail is a share of the context, or tokens', () {
+      const d = SummaryCompactionSettings();
+      expect(d.manualTailUnit, SummaryManualTailUnit.percent);
+      expect(d.manualTailPercent, 25);
+      expect(d.manualTailBudget(32000), 8000);
+      final tokens = SummaryCompactionSettings.fromJson({
+        'manualTailUnit': 'tokens',
+        'manualTailTokens': 3000,
+      });
+      expect(tokens.manualTailBudget(32000), 3000);
+      expect(SummaryCompactionSettings.fromJson(tokens.toJson()), tokens);
+      // Out-of-range values are clamped, an unknown unit falls back.
+      final odd = SummaryCompactionSettings.fromJson({
+        'manualTailUnit': 'messages',
+        'manualTailPercent': 400,
+      });
+      expect(odd.manualTailUnit, SummaryManualTailUnit.percent);
       expect(
-        SummaryChain.planSource(
-          blocks: const [],
-          messages: messages,
-          tailBudgetTokens: 0,
-          maxSourceTokens: 100000,
-          tailMessages: 0,
-        ).source.length,
-        8,
+        odd.manualTailPercent,
+        SummaryCompactionSettings.maxManualTailPercent,
       );
     });
 
