@@ -1188,6 +1188,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       searchQuery: w.searchQuery,
       searchCurrentIndex: w.searchCurrentIndex,
       searchRevision: w.searchRevision,
+      visibleStartIndex: w.visibleStartIndex,
       chatLayout: w.chatLayout,
       themeLayout: w.themeLayout,
       themeSyncKey: w.themeSyncKey,
@@ -1344,11 +1345,13 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 widget.sessionId == sessionId) {
               // Runs after the message sync above so the highlight pass reads
               // the edited bubbles: re-numbering the matches over the old text
-              // is what left the counter and the highlights out of step.
+              // is what left the counter and the highlights out of step. It
+              // scrolls only when the sync prepended the older messages the
+              // active hit lives in — the reader asked to go there.
               _syncDispatcher.applySearch(
                 bridge: bridge,
                 fields: _fieldsFor(widget),
-                scroll: false,
+                scroll: result.scrollToSearchMatch,
               );
             }
             if (placeholder == null || !isCurrent()) return;

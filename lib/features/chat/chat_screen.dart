@@ -246,7 +246,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   void _onSearchChanged() {
     if (!mounted) return;
+    _revealActiveMatch();
     setState(() {});
+  }
+
+  /// A hit in a message the page does not hold yet — further back than the
+  /// scrollback window — is reached by widening the window first; the
+  /// WebView scrolls to it once the older messages have landed (see
+  /// `ChatWebViewSyncDispatcher`). Without this the counter found hits in
+  /// the whole chat while the page could only ever show the newest ones.
+  void _revealActiveMatch() {
+    if (!_search.showSearch) return;
+    final index = _search.activeMatch?.messageIndex;
+    if (index == null) return;
+    ref.read(chatProvider(widget.charId).notifier).revealMessageIndex(index);
   }
 
   /// Keeps the open search in sync with the chat.
@@ -2403,7 +2416,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         ),
                         isSelectionMode: _selectionCtrl.isSelectionMode,
                         searchQuery: widget.search.searchQuery,
-                        searchCurrentIndex: widget.search.searchCurrentIndex,
+                        // As the page numbers them: over the window it holds.
+                        searchCurrentIndex: widget.search.pageMatchIndex(
+                          widget.state.visibleStartIndex,
+                        ),
                         searchRevision: widget.search.searchRevision,
                       ),
                     ),
