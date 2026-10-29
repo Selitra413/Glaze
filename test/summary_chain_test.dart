@@ -55,6 +55,43 @@ void main() {
         maxSourceTokens: 100000,
       );
       expect(plan.source.first.id, 'm3');
+      // Everything uncovered outside the tail, the run itself included.
+      expect(plan.remainingMessages, 5);
+    });
+
+    test('a message count as the tail ignores the token budget', () {
+      final messages = _chat(10);
+      final plan = SummaryChain.planSource(
+        blocks: const [],
+        messages: messages,
+        tailBudgetTokens: 100000,
+        maxSourceTokens: 100000,
+        tailMessages: 3,
+      );
+      expect(plan.source.map((m) => m.id), [for (var i = 0; i < 7; i++) 'm$i']);
+      // Never below the two newest messages, whatever the count says.
+      expect(
+        SummaryChain.planSource(
+          blocks: const [],
+          messages: messages,
+          tailBudgetTokens: 0,
+          maxSourceTokens: 100000,
+          tailMessages: 0,
+        ).source.length,
+        8,
+      );
+    });
+
+    test('counts what is left beyond the run it capped', () {
+      final messages = _chat(10);
+      final plan = SummaryChain.planSource(
+        blocks: const [],
+        messages: messages,
+        tailBudgetTokens: 0,
+        maxSourceTokens: 1,
+      );
+      expect(plan.source.map((m) => m.id), ['m0']);
+      expect(plan.remainingMessages, 8);
     });
 
     test('a stale block no longer covers its messages', () {

@@ -340,6 +340,25 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         ),
                       ),
                       MenuRangeItem(
+                        label: 'summary_manual_tail_label'.tr(),
+                        description: 'summary_manual_tail_hint'.tr(),
+                        value: _compaction.manualTailMessages.toDouble(),
+                        min: SummaryCompactionSettings.minManualTailMessages
+                            .toDouble(),
+                        max: SummaryCompactionSettings.maxManualTailMessages
+                            .toDouble(),
+                        divisions:
+                            SummaryCompactionSettings.maxManualTailMessages -
+                            SummaryCompactionSettings.minManualTailMessages,
+                        decimalPlaces: 0,
+                        editableValue: true,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            manualTailMessages: v.round(),
+                          ),
+                        ),
+                      ),
+                      MenuRangeItem(
                         label: 'summary_block_target_label'.tr(),
                         description: 'summary_block_target_hint'.tr(),
                         value: _compaction.blockTargetTokens.toDouble(),

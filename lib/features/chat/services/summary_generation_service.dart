@@ -34,6 +34,32 @@ class SummaryCompactionResult {
   bool get changed => created > 0 || merged > 0;
 }
 
+/// Where a compaction run stands, reported before each request it sends.
+class SummaryCompactionProgress {
+  /// Blocks written so far in this run.
+  final int created;
+  final int merged;
+
+  /// Adjacent blocks are being merged a level up rather than messages retold.
+  final bool merging;
+
+  /// Ids of the messages being retold now; empty while merging, and before
+  /// the first request has been planned.
+  final List<String> sourceIds;
+
+  /// Summarizable messages outside the fresh tail still uncovered once the
+  /// step under way lands.
+  final int remainingMessages;
+
+  const SummaryCompactionProgress({
+    this.created = 0,
+    this.merged = 0,
+    this.merging = false,
+    this.sourceIds = const [],
+    this.remainingMessages = 0,
+  });
+}
+
 /// Keeps the chat's summary chain in shape and runs every change to it.
 ///
 /// Compaction is driven by how full the prompt is, not by a message count —
@@ -59,13 +85,25 @@ class SummaryGenerationService {
 
   static bool isRunning(String sessionId) => _running.contains(sessionId);
 
-  /// Upper bound on steps per run, so a summarizer that keeps returning
-  /// oversized text cannot loop.
+  /// Upper bound on steps of an automatic run: it goes between two turns of
+  /// the chat, so it stops short rather than hold the next one up.
   static const _maxSteps = 12;
 
+  /// Steps in a row that wrote nothing — the chat was edited under each of
+  /// them — before a run gives up. Keeps a run from spinning on a chat that
+  /// changes faster than it is retold.
+  static const _maxIdleSteps = 3;
+
   /// Compacts [session] until the prompt is back under the trigger. [force]
-  /// ignores the trigger and the minimum run size: everything older than the
-  /// fresh tail is summarized.
+  /// ignores the trigger and the minimum run size, keeps only the newest
+  /// `manualTailMessages` as raw history rather than the rest of the window,
+  /// and keeps going, one block at a time, until everything older is
+  /// summarized — the whole backlog of a long chat, however many blocks it
+  /// takes.
+  ///
+  /// [onProgress] hears where the run stands before each request. A
+  /// cancelled [cancelToken] ends the run after the step under way: what was
+  /// written stays.
   ///
   /// Throws [SummaryChainException] `busy` when a run is already going, and
   /// whatever the transport throws.
@@ -74,6 +112,7 @@ class SummaryGenerationService {
     required ChatSession session,
     bool force = false,
     CancelToken? cancelToken,
+    void Function(SummaryCompactionProgress progress)? onProgress,
   }) {
     return _exclusive(session.id, () async {
       final settings = await _ref.read(
@@ -91,8 +130,9 @@ class SummaryGenerationService {
       final budget = _promptBudget(charId);
       var created = 0;
       var merged = 0;
+      var idle = 0;
 
-      for (var step = 0; step < _maxSteps; step++) {
+      for (var step = 0; force || step < _maxSteps; step++) {
         if (cancelToken?.isCancelled == true) break;
         messages = await _messages(session.id, session.messages);
         final blocks = await _cleanBlocks(session.id, messages);
@@ -111,6 +151,13 @@ class SummaryGenerationService {
             maxInputTokens: inputCap,
           );
           if (parts.isNotEmpty) {
+            onProgress?.call(
+              SummaryCompactionProgress(
+                created: created,
+                merged: merged,
+                merging: true,
+              ),
+            );
             await _merge(
               sessionId: session.id,
               parts: parts,
@@ -134,6 +181,7 @@ class SummaryGenerationService {
           messages: messages,
           tailBudgetTokens: budget.total - triggerTokens,
           maxSourceTokens: inputCap,
+          tailMessages: force ? settings.manualTailMessages : null,
         );
         if (plan.source.isEmpty) break;
         final overflow = used > budget.total;
@@ -147,6 +195,14 @@ class SummaryGenerationService {
           blocks,
           messages,
           plan.source.first.id,
+        );
+        onProgress?.call(
+          SummaryCompactionProgress(
+            created: created,
+            merged: merged,
+            sourceIds: [for (final m in plan.source) m.id],
+            remainingMessages: plan.remainingMessages - plan.source.length,
+          ),
         );
 
         final text = await service.summarizeMessages(
@@ -184,8 +240,10 @@ class SummaryGenerationService {
           }
           return SummaryChain.commitSource(blocks, current, block);
         })) {
+          if (++idle >= _maxIdleSteps) break;
           continue;
         }
+        idle = 0;
         created++;
       }
       return SummaryCompactionResult(created: created, merged: merged);

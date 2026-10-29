@@ -64,8 +64,8 @@ const _memoryConfig = ApiConfig(
   maxTokens: 4096,
 );
 
-// Long enough that the oldest messages fall outside the fresh tail (a quarter
-// of the chat connection's window), so a forced compaction has a run to send.
+// Long enough that the oldest messages fall outside the fresh tail — the two
+// newest messages, see [_harness] — so a forced compaction has a run to send.
 final _session = ChatSession(
   id: 'session',
   characterId: 'char',
@@ -83,7 +83,11 @@ final _session = ChatSession(
 typedef _Harness = ({ProviderContainer container, _RecordingAuxLlmClient llm});
 
 Future<_Harness> _harness({MemoryBookApiSettings? slot}) async {
-  SharedPreferences.setMockInitialValues({});
+  // A manual run keeps the newest `manualTailMessages` as raw history; the
+  // default would keep this whole short chat.
+  SharedPreferences.setMockInitialValues({
+    'summaryCompaction': '{"manualTailMessages": 2}',
+  });
   final db = AppDatabase.forTesting(NativeDatabase.memory());
   final llm = _RecordingAuxLlmClient();
   final container = ProviderContainer(

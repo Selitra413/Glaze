@@ -245,7 +245,7 @@ class SummaryBlockCard extends StatelessWidget {
 
   Widget _status(BuildContext context) {
     final since = generatingSince;
-    if (since != null) return _ElapsedLabel(since: since);
+    if (since != null) return SummaryElapsedLabel(since: since);
     final draft = block.draft;
     final (text, color) = draft != null && draftStale
         ? ('summary_draft_stale'.tr(), _kDanger)
@@ -282,20 +282,21 @@ class SummaryBlockCard extends StatelessWidget {
   ];
 }
 
-/// "Generating… 12.3s", counted from [since].
+/// "Generating… 12.3s", counted from [since]. Shared with the tab's own
+/// compaction progress line.
 ///
 /// Ticks on its own so only this line rebuilds, five times a second — the
 /// reason `MemoryDraftCard` moved its ticker off the tab.
-class _ElapsedLabel extends StatefulWidget {
+class SummaryElapsedLabel extends StatefulWidget {
   final DateTime since;
 
-  const _ElapsedLabel({required this.since});
+  const SummaryElapsedLabel({super.key, required this.since});
 
   @override
-  State<_ElapsedLabel> createState() => _ElapsedLabelState();
+  State<SummaryElapsedLabel> createState() => SummaryElapsedLabelState();
 }
 
-class _ElapsedLabelState extends State<_ElapsedLabel> {
+class SummaryElapsedLabelState extends State<SummaryElapsedLabel> {
   late final Timer _ticker;
 
   @override

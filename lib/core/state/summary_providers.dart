@@ -35,11 +35,18 @@ class SummaryCompactionSettings {
   /// blocks are merged a level up.
   final int mergePercent;
 
+  /// How many of the newest messages a manual run ("Compact history") leaves
+  /// as raw history. The automatic run keeps the rest of the window instead
+  /// ([triggerPercent]); a reader compacting by hand wants the summary brought
+  /// up to nearly now, and plays on from there.
+  final int manualTailMessages;
+
   const SummaryCompactionSettings({
     this.autoEnabled = false,
     this.triggerPercent = 75,
     this.blockTargetTokens = 1000,
     this.mergePercent = 20,
+    this.manualTailMessages = 10,
   });
 
   static const minTriggerPercent = 50;
@@ -48,17 +55,21 @@ class SummaryCompactionSettings {
   static const maxBlockTargetTokens = 4000;
   static const minMergePercent = 5;
   static const maxMergePercent = 50;
+  static const minManualTailMessages = 2;
+  static const maxManualTailMessages = 100;
 
   SummaryCompactionSettings copyWith({
     bool? autoEnabled,
     int? triggerPercent,
     int? blockTargetTokens,
     int? mergePercent,
+    int? manualTailMessages,
   }) => SummaryCompactionSettings(
     autoEnabled: autoEnabled ?? this.autoEnabled,
     triggerPercent: triggerPercent ?? this.triggerPercent,
     blockTargetTokens: blockTargetTokens ?? this.blockTargetTokens,
     mergePercent: mergePercent ?? this.mergePercent,
+    manualTailMessages: manualTailMessages ?? this.manualTailMessages,
   );
 
   Map<String, dynamic> toJson() => {
@@ -66,6 +77,7 @@ class SummaryCompactionSettings {
     'triggerPercent': triggerPercent,
     'blockTargetTokens': blockTargetTokens,
     'mergePercent': mergePercent,
+    'manualTailMessages': manualTailMessages,
   };
 
   factory SummaryCompactionSettings.fromJson(Map<String, dynamic> json) {
@@ -95,6 +107,12 @@ class SummaryCompactionSettings {
         minMergePercent,
         maxMergePercent,
       ),
+      manualTailMessages: read(
+        'manualTailMessages',
+        d.manualTailMessages,
+        minManualTailMessages,
+        maxManualTailMessages,
+      ),
     );
   }
 
@@ -104,11 +122,17 @@ class SummaryCompactionSettings {
       other.autoEnabled == autoEnabled &&
       other.triggerPercent == triggerPercent &&
       other.blockTargetTokens == blockTargetTokens &&
-      other.mergePercent == mergePercent;
+      other.mergePercent == mergePercent &&
+      other.manualTailMessages == manualTailMessages;
 
   @override
-  int get hashCode =>
-      Object.hash(autoEnabled, triggerPercent, blockTargetTokens, mergePercent);
+  int get hashCode => Object.hash(
+    autoEnabled,
+    triggerPercent,
+    blockTargetTokens,
+    mergePercent,
+    manualTailMessages,
+  );
 }
 
 final summaryCompactionSettingsProvider =

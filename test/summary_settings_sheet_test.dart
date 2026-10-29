@@ -356,6 +356,7 @@ void main() {
     expect(find.byType(Switch), findsNWidgets(2));
     expect(find.text('summary_auto_label'.tr()), findsOneWidget);
     expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_label'.tr()), findsOneWidget);
     expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
     expect(find.text('summary_merge_label'.tr()), findsOneWidget);
     // Summarizing runs on the Memory slot, so the settings say where that
