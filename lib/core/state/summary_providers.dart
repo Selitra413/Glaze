@@ -71,8 +71,6 @@ class SummaryCompactionSettings {
   static const maxMergePercent = 50;
   static const minManualTailPercent = 5;
   static const maxManualTailPercent = 90;
-  static const minManualTailTokens = 500;
-  static const maxManualTailTokens = 200000;
 
   /// Tokens of raw history a manual run keeps for a chat connection with
   /// [contextSize] tokens of context.
@@ -145,12 +143,11 @@ class SummaryCompactionSettings {
         minManualTailPercent,
         maxManualTailPercent,
       ),
-      manualTailTokens: read(
-        'manualTailTokens',
-        d.manualTailTokens,
-        minManualTailTokens,
-        maxManualTailTokens,
-      ),
+      // No upper bound: a window can be as large as the connection allows.
+      manualTailTokens: switch (json['manualTailTokens']) {
+        final num v when v >= 1 => v.toInt(),
+        _ => d.manualTailTokens,
+      },
     );
   }
 

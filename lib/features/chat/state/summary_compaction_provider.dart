@@ -118,8 +118,9 @@ class SummaryCompactionNotifier extends Notifier<SummaryCompactionState> {
         throw const SummaryChainException('nothing_to_compact');
       }
     } catch (e) {
-      // A stop is not a failure: the reader asked for it.
-      if (token.isCancelled || !ref.mounted) return;
+      // A stop aborts nothing, so whatever was thrown is a real failure, the
+      // last block's included.
+      if (!ref.mounted) return;
       state = state._with(
         lastFailure: SummaryCompactionFailure(
           sessionId: sessionId,

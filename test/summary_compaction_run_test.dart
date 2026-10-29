@@ -40,6 +40,13 @@ class _CountingLlmClient extends AuxLlmClient {
   }) async {
     calls++;
     onCall?.call(calls);
+    // As the real transport does: a cancelled request never answers.
+    if (cancelToken?.isCancelled ?? false) {
+      throw DioException.requestCancelled(
+        requestOptions: RequestOptions(),
+        reason: 'cancelled',
+      );
+    }
     return 'summary';
   }
 }

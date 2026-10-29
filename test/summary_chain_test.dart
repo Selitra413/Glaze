@@ -71,6 +71,19 @@ void main() {
       });
       expect(tokens.manualTailBudget(32000), 3000);
       expect(SummaryCompactionSettings.fromJson(tokens.toJson()), tokens);
+      // Tokens have no upper bound; a non-positive number is not a tail.
+      expect(
+        SummaryCompactionSettings.fromJson({
+          'manualTailTokens': 1000000,
+        }).manualTailTokens,
+        1000000,
+      );
+      expect(
+        SummaryCompactionSettings.fromJson({
+          'manualTailTokens': 0,
+        }).manualTailTokens,
+        d.manualTailTokens,
+      );
       // Out-of-range values are clamped, an unknown unit falls back.
       final odd = SummaryCompactionSettings.fromJson({
         'manualTailUnit': 'messages',

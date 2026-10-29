@@ -102,8 +102,9 @@ class SummaryGenerationService {
   /// takes.
   ///
   /// [onProgress] hears where the run stands before each request. A
-  /// cancelled [cancelToken] ends the run after the step under way: what was
-  /// written stays.
+  /// cancelled [cancelToken] ends the run after the step under way: the
+  /// request already sent is not aborted, its block is written, and nothing
+  /// follows. Every block written stays.
   ///
   /// Throws [SummaryChainException] `busy` when a run is already going, and
   /// whatever the transport throws.
@@ -167,7 +168,7 @@ class SummaryGenerationService {
               template: mergeTemplate,
               shortenTemplate: shortenTemplate,
               temperature: slot.generationTemperature,
-              cancelToken: cancelToken,
+              // Not [cancelToken]: a stop lets the step under way land.
             );
             merged++;
             continue;
@@ -215,7 +216,7 @@ class SummaryGenerationService {
           customPrompt: template,
           shortenTemplate: shortenTemplate,
           macroContext: _macroContext(charId: charId, session: session),
-          cancelToken: cancelToken,
+          // Not [cancelToken]: a stop lets the step under way land.
           temperature: slot.generationTemperature,
         );
         final tokens = _acceptedTokens(text, plan.sourceTokens);
