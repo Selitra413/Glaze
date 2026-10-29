@@ -642,6 +642,120 @@ void main() {
       expect(bridge.searchCalls, [('foo', 2, false)]);
     });
 
+    test('a hit revealed by a wider scrollback window scrolls once the older '
+        'messages land', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+      final older = _assistant('a0');
+      final newer = _assistant('a1');
+
+      // The hit is in a0, which the page did not hold: the window grows to
+      // it, and the active index becomes the page's own numbering.
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          messages: [newer],
+          searchQuery: 'foo',
+          searchCurrentIndex: -1,
+          visibleStartIndex: 1,
+        ),
+        current: _fields(
+          isGenerating: false,
+          messages: [older, newer],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+          visibleStartIndex: 0,
+        ),
+        oldMessages: [newer],
+        newMessages: [older, newer],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      // Not yet: the page cannot scroll to a message it is still being
+      // handed by the sync queued after this dispatch.
+      expect(bridge.searchCalls, isEmpty);
+      expect(result.runMessageSync, isTrue);
+      expect(result.rehighlightSearch, isTrue);
+      expect(result.scrollToSearchMatch, isTrue);
+    });
+
+    test('scrolling up under an open search re-numbers without pulling the '
+        'reader back to the hit', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+      final older = _assistant('a0');
+      final newer = _assistant('a1');
+      // The older page holds two hits: the same active hit is now the page's
+      // third.
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          messages: [newer],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+          searchActiveIndex: 5,
+          visibleStartIndex: 1,
+        ),
+        current: _fields(
+          isGenerating: false,
+          messages: [older, newer],
+          searchQuery: 'foo',
+          searchCurrentIndex: 2,
+          searchActiveIndex: 5,
+          visibleStartIndex: 0,
+        ),
+        oldMessages: [newer],
+        newMessages: [older, newer],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+      expect(bridge.searchCalls, isEmpty);
+      expect(result.rehighlightSearch, isTrue);
+      expect(result.scrollToSearchMatch, isFalse);
+    });
+
+    test('an edit under an open search re-numbers without scrolling', () {
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+      final edited = _assistant('a1').copyWith(content: 'edited');
+      final result = dispatcher.dispatch(
+        bridge: _FakeBridge(),
+        old: _fields(
+          isGenerating: false,
+          messages: [_assistant('a1')],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+        ),
+        current: _fields(
+          isGenerating: false,
+          messages: [edited],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+          searchRevision: 1,
+        ),
+        oldMessages: [_assistant('a1')],
+        newMessages: [edited],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+      expect(result.rehighlightSearch, isTrue);
+      expect(result.scrollToSearchMatch, isFalse);
+    });
+
     test(
       'a delta that settles after the run does not re-append the bubble',
       () async {
@@ -1137,6 +1251,8 @@ ChatWebViewWidgetFields _fields({
   String? searchQuery,
   int searchCurrentIndex = -1,
   int searchRevision = 0,
+  int searchActiveIndex = 0,
+  int visibleStartIndex = 0,
   String? themeLayout,
 }) => ChatWebViewWidgetFields(
   continuationTargetId: continuationTargetId,
@@ -1158,6 +1274,8 @@ ChatWebViewWidgetFields _fields({
   searchQuery: searchQuery,
   searchCurrentIndex: searchCurrentIndex,
   searchRevision: searchRevision,
+  searchActiveIndex: searchActiveIndex,
+  visibleStartIndex: visibleStartIndex,
   chatLayout: 'default',
   themeLayout: themeLayout,
   themeSyncKey: 'theme',
