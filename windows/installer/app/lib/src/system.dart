@@ -72,12 +72,15 @@ class WindowsSystem implements SetupSystem {
   @override
   Future<Map<String, String>?> readKey(String key) async {
     // Not `reg query`: it prints in the console's code page, which mangles a
-    // path under a Cyrillic user name.
+    // path under a Cyrillic user name. Test-Path first, not Get-ItemProperty
+    // with -ErrorAction SilentlyContinue: that still leaves `$?` false when
+    // the key is missing, and powershell -Command then exits 1 with nothing
+    // on stderr — which read as a failure on every first install, where the
+    // key does not exist yet.
     final out = await _powershell(
-      r'$p = Get-ItemProperty -LiteralPath "HKCU:\$env:GLZ_KEY"'
-      r' -ErrorAction SilentlyContinue;'
-      r' if ($p) { $p | Select-Object * -ExcludeProperty PS* |'
-      r' ConvertTo-Json -Compress }',
+      r'if (Test-Path -LiteralPath "HKCU:\$env:GLZ_KEY") {'
+      r' Get-ItemProperty -LiteralPath "HKCU:\$env:GLZ_KEY" |'
+      r' Select-Object * -ExcludeProperty PS* | ConvertTo-Json -Compress }',
       env: {'GLZ_KEY': key},
     );
     return parseKeyJson(out);
@@ -219,6 +222,13 @@ class WindowsSystem implements SetupSystem {
         '[Console]::OutputEncoding = [Text.Encoding]::UTF8; $command',
       ], env: env);
 
+  /// Output is read as UTF-8 where it is — PowerShell's, see [_powershell] —
+  /// and never refused where it is not: `reg.exe` answers in the console's
+  /// code page ("Операция успешно завершена." on a Russian Windows), which a
+  /// strict decoder throws on, and so would PowerShell's own error text when
+  /// it fails before switching its output to UTF-8.
+  static const _lenientUtf8 = Utf8Codec(allowMalformed: true);
+
   Future<String> _run(
     String exe,
     List<String> args, {
@@ -228,11 +238,15 @@ class WindowsSystem implements SetupSystem {
       exe,
       args,
       environment: env,
-      stdoutEncoding: utf8,
-      stderrEncoding: utf8,
+      stdoutEncoding: _lenientUtf8,
+      stderrEncoding: _lenientUtf8,
     );
     if (r.exitCode != 0) {
-      throw ProcessException(exe, args, '${r.stderr}'.trim(), r.exitCode);
+      // A tool that fails without a word on stderr may still have said why
+      // on stdout; an empty message leaves the reader with only the command.
+      final stderr = '${r.stderr}'.trim();
+      final message = stderr.isNotEmpty ? stderr : '${r.stdout}'.trim();
+      throw ProcessException(exe, args, message, r.exitCode);
     }
     return r.stdout as String;
   }
