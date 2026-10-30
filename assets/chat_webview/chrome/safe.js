@@ -93,6 +93,7 @@ export const getScrollHeight = getter(Element.prototype, 'scrollHeight');
 export const getScrollWidth = getter(Element.prototype, 'scrollWidth');
 export const getClientWidth = getter(Element.prototype, 'clientWidth');
 export const getClientHeight = getter(Element.prototype, 'clientHeight');
+export const getTagName = getter(Element.prototype, 'tagName');
 export const getScrollLeft = getter(Element.prototype, 'scrollLeft');
 export const setScrollLeft = setter(Element.prototype, 'scrollLeft');
 export const getScrollTop = getter(Element.prototype, 'scrollTop');
