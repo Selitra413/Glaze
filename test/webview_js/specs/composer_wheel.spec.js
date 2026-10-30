@@ -126,7 +126,7 @@ test('a notch over the chat still scrolls the chat', async ({ page }) => {
   expect(await chatTop(page)).toBeGreaterThan(chatBefore);
 });
 
-test('past the field\'s end the step goes on to the chat', async ({ page }) => {
+test('past the field\'s end the step stops there: the chat behind stays put', async ({ page }) => {
   await open(page);
   const r = await composerRect(page);
   const x = r[0] + r[2] / 2;
@@ -136,9 +136,25 @@ test('past the field\'s end the step goes on to the chat', async ({ page }) => {
     for (let i = 0; i < 50; i++) window.__glazeChrome.scrollAt(x, y, 0, 100);
   }, [x, y]);
   expect(await page.evaluate(([x, y]) => window.__glazeChrome.canScrollAt(x, y, 0, 1), [x, y])).toBe(false);
+  expect(await page.evaluate(([x, y]) => window.__glazeChrome.ownsScrollAt(x, y), [x, y])).toBe(true);
 
   const chatBefore = await chatTop(page);
   await page.evaluate(([x, y]) => window.bridge.wheelScroll(0, 100, x, y), [x, y]);
   await page.waitForTimeout(500);
-  expect(await chatTop(page)).toBeGreaterThan(chatBefore);
+  expect(await chatTop(page)).toBe(chatBefore);
+  // And nothing of that notch is kept for the way back up.
+  expect(await page.evaluate(() => window.bridge._scrollRelay.pendingWheel.dy)).toBe(0);
+});
+
+test("at the field's top a notch up goes nowhere either", async ({ page }) => {
+  await open(page);
+  const r = await composerRect(page);
+  const x = r[0] + r[2] / 2;
+  const y = r[1] + r[3] / 2;
+  const chatBefore = await chatTop(page);
+  // The field opens at its top: a notch up has nowhere to go, and the chat
+  // behind it is not where it goes.
+  await page.evaluate(([x, y]) => window.bridge.wheelScroll(0, -100, x, y), [x, y]);
+  await page.waitForTimeout(500);
+  expect(await chatTop(page)).toBe(chatBefore);
 });

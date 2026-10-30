@@ -497,8 +497,21 @@ function handle(msg) {
 // the scrollable under the point inside its own root and moves it itself, so
 // no node of the chrome leaves the root. Nothing here takes a key: scrolling
 // a field by a distance is nothing a message could not do with a real wheel.
+//
+// A field under the cursor owns the wheel outright: a step it cannot take —
+// the field at its end, or with nothing to scroll yet — ends there rather than
+// going on to the chat, the way the cursor over a text field in any editor
+// never scrolls the page behind it.
 
 const SCROLLABLE_OVERFLOW = /^(auto|scroll|overlay)$/;
+
+/** A surface the wheel belongs to while the cursor is over it. */
+function isScrollSurface(el) {
+  if (S.getTagName(el) === 'TEXTAREA') return true;
+  const style = S.computedStyle(el);
+  return SCROLLABLE_OVERFLOW.test(style.overflowY) ||
+    SCROLLABLE_OVERFLOW.test(style.overflowX);
+}
 
 function canScrollEl(el, dx, dy) {
   const style = S.computedStyle(el);
@@ -523,13 +536,28 @@ function ownNode(el) {
   return false;
 }
 
-/** The nearest element of the chrome under (x, y) that can still scroll by (dx, dy). */
-function scrollableAt(x, y, dx, dy) {
+/** The chrome's element under (x, y), or null where the chrome has nothing. */
+function chromeElementAt(x, y) {
   if (!S.numberIsFinite(x) || !S.numberIsFinite(y)) return null;
-  let el = S.elementFromPointIn(shadow, x, y);
+  const el = S.elementFromPointIn(shadow, x, y);
   // Where the chrome has nothing, the root's hit test answers with the page's
   // own element under the point; that one is the page's to scroll, not ours.
-  if (!el || !ownNode(el)) return null;
+  return el && ownNode(el) ? el : null;
+}
+
+/** The nearest scroll surface of the chrome under (x, y), if the point is over one. */
+function surfaceAt(x, y) {
+  let el = chromeElementAt(x, y);
+  while (el && el !== rootEl) {
+    if (S.getNodeType(el) === 1 && isScrollSurface(el)) return el;
+    el = S.getParentNode(el);
+  }
+  return null;
+}
+
+/** The nearest element of the chrome under (x, y) that can still scroll by (dx, dy). */
+function scrollableAt(x, y, dx, dy) {
+  let el = chromeElementAt(x, y);
   while (el && el !== rootEl) {
     if (S.getNodeType(el) === 1 && canScrollEl(el, dx, dy)) return el;
     el = S.getParentNode(el);
@@ -539,6 +567,10 @@ function scrollableAt(x, y, dx, dy) {
 
 const api = S.freeze({
   pageId: PAGE_ID,
+  /** Whether the wheel over (x, y) belongs to the chrome: a field or scroller of its is there. */
+  ownsScrollAt(x, y) {
+    return !!surfaceAt(+x, +y);
+  },
   /** Whether something of the chrome under (x, y) can still scroll by (dx, dy). */
   canScrollAt(x, y, dx, dy) {
     return !!scrollableAt(+x, +y, +dx || 0, +dy || 0);
