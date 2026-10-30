@@ -487,8 +487,72 @@ function handle(msg) {
   ctx.scheduleReport();
 }
 
+/* ---------- Scroll under the cursor ---------- */
+
+// Desktop scroll input comes in through Flutter (bridge/scroll_relay.js) and
+// lands on whatever `document.elementFromPoint` finds under the cursor. Over
+// the chrome that is this host — the root is closed, so the document's hit
+// test stops at it — and the relay went on to scroll the chat under the
+// composer's own field. The relay asks here first instead: the chrome finds
+// the scrollable under the point inside its own root and moves it itself, so
+// no node of the chrome leaves the root. Nothing here takes a key: scrolling
+// a field by a distance is nothing a message could not do with a real wheel.
+
+const SCROLLABLE_OVERFLOW = /^(auto|scroll|overlay)$/;
+
+function canScrollEl(el, dx, dy) {
+  const style = S.computedStyle(el);
+  if (dy !== 0 && SCROLLABLE_OVERFLOW.test(style.overflowY)) {
+    const max = S.getScrollHeight(el) - S.getClientHeight(el);
+    const top = S.getScrollTop(el);
+    if (max > 1 && ((dy < 0 && top > 0) || (dy > 0 && top < max - 1))) return true;
+  }
+  if (dx !== 0 && SCROLLABLE_OVERFLOW.test(style.overflowX)) {
+    const max = S.getScrollWidth(el) - S.getClientWidth(el);
+    const left = S.getScrollLeft(el);
+    if (max > 1 && ((dx < 0 && left > 0) || (dx > 0 && left < max - 1))) return true;
+  }
+  return false;
+}
+
+/** Whether [el] is in the chrome's own tree, under its root. */
+function ownNode(el) {
+  for (let n = el; n; n = S.getParentNode(n)) {
+    if (n === rootEl) return true;
+  }
+  return false;
+}
+
+/** The nearest element of the chrome under (x, y) that can still scroll by (dx, dy). */
+function scrollableAt(x, y, dx, dy) {
+  if (!S.numberIsFinite(x) || !S.numberIsFinite(y)) return null;
+  let el = S.elementFromPointIn(shadow, x, y);
+  // Where the chrome has nothing, the root's hit test answers with the page's
+  // own element under the point; that one is the page's to scroll, not ours.
+  if (!el || !ownNode(el)) return null;
+  while (el && el !== rootEl) {
+    if (S.getNodeType(el) === 1 && canScrollEl(el, dx, dy)) return el;
+    el = S.getParentNode(el);
+  }
+  return null;
+}
+
 const api = S.freeze({
   pageId: PAGE_ID,
+  /** Whether something of the chrome under (x, y) can still scroll by (dx, dy). */
+  canScrollAt(x, y, dx, dy) {
+    return !!scrollableAt(+x, +y, +dx || 0, +dy || 0);
+  },
+  /** Scrolls that element by (dx, dy); false when nothing of the chrome is there to scroll. */
+  scrollAt(x, y, dx, dy) {
+    dx = +dx || 0;
+    dy = +dy || 0;
+    const el = scrollableAt(+x, +y, dx, dy);
+    if (!el) return false;
+    if (dx !== 0) S.setScrollLeft(el, S.getScrollLeft(el) + dx);
+    if (dy !== 0) S.setScrollTop(el, S.getScrollTop(el) + dy);
+    return true;
+  },
   /** Hands the two keys out — once per page load, to Flutter. */
   handshake() {
     if (handedOut) return null;
