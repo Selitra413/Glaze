@@ -27,6 +27,36 @@ void main() {
     expect(plan.drafts[1].messageIds, ['m4', 'm5', 'm6']);
   });
 
+  test('hidden, empty and error messages are never planned into a draft', () {
+    // The manifest captured at generation refuses them, so a draft holding
+    // one could never be generated. They are left out, and the chunks are
+    // counted over what remains.
+    final messages = [
+      _message(1),
+      _message(2).copyWith(isHidden: true),
+      _message(3),
+      _message(4).copyWith(content: '   '),
+      _message(5),
+      _message(6).copyWith(isError: true),
+      _message(7),
+      _message(8),
+    ];
+    final plan = MemoryDraftPlanner.plan(
+      book: const MemoryBook(id: 'book', sessionId: 's'),
+      messages: messages,
+      interval: 2,
+      lagMessages: 0,
+      source: 'test',
+      nowMillis: 1000,
+    );
+
+    expect(plan.eligibleMessageCount, 5);
+    expect(plan.drafts.map((d) => d.messageIds), [
+      ['m1', 'm3'],
+      ['m5', 'm7'],
+    ]);
+  });
+
   test('does not include already covered messages', () {
     final plan = MemoryDraftPlanner.plan(
       book: const MemoryBook(

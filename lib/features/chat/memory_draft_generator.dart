@@ -47,10 +47,21 @@ class MemoryDraftGenerator {
     required Map<String, String> sessionVars,
     CancelToken? cancelToken,
   }) async {
+    // What the draft was planned over, less anything hidden, emptied, deleted
+    // or turned into an error bubble since: the manifest refuses those, and a
+    // draft kept pointing at them could never be generated again. The draft
+    // comes back with the sources it was in fact retold from.
+    final sources = messages.where(MemorySourceManifest.eligible).toList();
+    if (sources.isEmpty) {
+      throw StateError(
+        'None of the messages this draft was planned over is left to retell.',
+      );
+    }
+    final sourceIds = [for (final message in sources) message.id];
     final manifest = MemorySourceManifest.capture(
       sessionId,
-      messages,
-      draft.messageIds,
+      sources,
+      sourceIds,
     );
     final character = await _read(characterRepoProvider).getById(charId);
     if (character == null) throw StateError('Character not found: $charId');
@@ -73,9 +84,9 @@ class MemoryDraftGenerator {
     final globalRegexes = await _read(globalRegexProvider.future);
     final studioRegexes = await _read(studioRegexProvider.future);
     final globalVars = _read(globalVarsProvider);
-    final ledgerRange = MemoryDraftTranscriptBuilder.ledgerRange(messages);
+    final ledgerRange = MemoryDraftTranscriptBuilder.ledgerRange(sources);
     final historyText = MemoryDraftTranscriptBuilder.build(
-      messages: messages,
+      messages: sources,
       scripts: [
         ...?preset?.regexes,
         ...globalRegexes,
@@ -205,7 +216,7 @@ class MemoryDraftGenerator {
       ),
     );
     return MemoryDraftResponseParser.parse(
-      draft.copyWith(sourceManifest: manifest),
+      draft.copyWith(messageIds: sourceIds, sourceManifest: manifest),
       result,
       ledgerRange: ledgerRange,
     );

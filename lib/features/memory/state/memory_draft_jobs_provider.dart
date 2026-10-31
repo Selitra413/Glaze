@@ -233,6 +233,7 @@ class MemoryDraftJobsNotifier extends Notifier<MemoryDraftJobsState> {
                 keys: generated.keys,
                 keyParagraphs: generated.keyParagraphs,
                 ledgerRange: generated.ledgerRange,
+                messageIds: generated.messageIds,
                 sourceManifest: generated.sourceManifest,
                 status: 'pending_approval',
                 generatedAt: generated.generatedAt,

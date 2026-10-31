@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import '../models/chat_message.dart';
 import '../models/memory_book.dart';
+import '../models/memory_source_manifest.dart';
 
 class MemoryDraftPlan {
   final List<MemoryDraft> drafts;
@@ -28,10 +29,11 @@ class MemoryDraftPlanner {
     required String source,
     required int nowMillis,
   }) {
+    // The same rule the source manifest checks at generation time: a draft
+    // planned over a hidden message, an error bubble or an empty one failed
+    // that check on every attempt and stayed "needs regeneration" for good.
     final stableMessages = messages
-        .where(
-          (m) => !m.isTyping && (m.role == 'user' || m.role == 'assistant'),
-        )
+        .where(MemorySourceManifest.eligible)
         .toList();
     final normalizedLag = lagMessages < 0 ? 0 : lagMessages;
     final eligibleMessages = stableMessages.length > normalizedLag
